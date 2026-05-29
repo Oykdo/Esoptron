@@ -1,0 +1,46 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Dist-tag (latest, beta, next)"
+        required: true
+        default: "beta"
+        type: choice
+        options: [latest, beta, next]
+
+permissions:
+  contents: read
+  id-token: write  # for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Install
+        run: npm ci || npm install
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish \
+            --access public \
+            --provenance \
+            --tag ${{ github.event_name == 'release' && 'latest' || inputs.tag }}

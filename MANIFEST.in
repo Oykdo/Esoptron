@@ -1,0 +1,15 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+include SECURITY.md
+include pyproject.toml
+recursive-include src/eopx *.py py.typed
+recursive-exclude tests *
+recursive-exclude scripts *
+recursive-exclude pwa *
+recursive-exclude sdk *
+recursive-exclude docs *
+recursive-exclude out *
+prune .github
+prune .pytest_cache
+prune .git

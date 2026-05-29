@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+.venv/
+venv/
+build/
+dist/
+out/
+*.tmp
+
+# Node / TS
+node_modules/
+sdk/typescript/dist/
+pwa/dist/
+pwa/.next/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local-only artifacts (not for public repo)
+README_old.md
+eopx_format_spec.docx
+eopx_verify_spec.docx
+DOCUMENT DE SYNTHÈSE*.txt
+DOCUMENT DE SYNTH*RECHERCHE*.txt
+

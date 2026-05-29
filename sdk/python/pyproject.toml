@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "esoptron"
+version = "0.1.0"
+description = "Esoptron verification SDK — read and validate .eopx artefacts."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary - see SDK_LICENSE" }
+authors = [{ name = "Logos / Esoptron team" }]
+keywords = ["esoptron", "eopx", "post-quantum", "dilithium", "verification"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = [
+    "Pillow>=10.0",
+    "pqcrypto>=0.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+eopx-verify = "esoptron._cli:main"
+
+[tool.setuptools.packages.find]
+include = ["esoptron*"]

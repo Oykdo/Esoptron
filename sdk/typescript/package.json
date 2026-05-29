@@ -1,0 +1,48 @@
+{
+  "name": "@esoptron/verify",
+  "version": "0.1.0",
+  "description": "Self-contained verifier for .eopx files",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run --passWithNoTests",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "esoptron",
+    "eopx",
+    "verification",
+    "post-quantum",
+    "ml-dsa",
+    "dilithium"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@noble/hashes": "^1.7.2",
+    "@noble/post-quantum": "^0.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "pngjs": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "pngjs": {
+      "optional": true
+    }
+  }
+}
