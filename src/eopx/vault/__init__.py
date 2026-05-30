@@ -22,6 +22,11 @@ E. genesis_enroll(sheet_symbols, ...)          -- ceremony onboarding
 F. vault_migrate(master_key, challenge)        -- cross-machine migration
    NIZK proof of vault ownership for migrating to a new device without
    exposing the master_key. Uses Fiat-Shamir transformed commitment.
+
+G. reclaim_from_phrase / reclaim_from_shards  -- identity reclaim
+   Re-derive the exact original EnrollmentRecord on a new device from
+   the PUBLIC card + a second factor (BIP-39 phrase or k-of-n shard
+   quorum). See ``docs/specs/EPX-G_reclaim.md``.
 """
 
 from .unlock import (
@@ -59,6 +64,19 @@ from .migrate import (
     verify_migration,
     compute_verify_tag,
 )
+from .reclaim import (
+    RECLAIM_CLAIM_VERSION,
+    DEFAULT_RECLAIM_TTL_SECONDS,
+    NO_TARGET_CONTEXT,
+    PATH_PHRASE,
+    PATH_SHARDS,
+    PATH_OTHER,
+    ReclaimClaim,
+    reclaim_from_phrase,
+    reclaim_from_shards,
+    reclaim_from_entropy,
+    verify_reclaim,
+)
 
 __all__ = [
     "derive_master_key",
@@ -87,4 +105,15 @@ __all__ = [
     "prove_migration",
     "verify_migration",
     "compute_verify_tag",
+    "RECLAIM_CLAIM_VERSION",
+    "DEFAULT_RECLAIM_TTL_SECONDS",
+    "NO_TARGET_CONTEXT",
+    "PATH_PHRASE",
+    "PATH_SHARDS",
+    "PATH_OTHER",
+    "ReclaimClaim",
+    "reclaim_from_phrase",
+    "reclaim_from_shards",
+    "reclaim_from_entropy",
+    "verify_reclaim",
 ]

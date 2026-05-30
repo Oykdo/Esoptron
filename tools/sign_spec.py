@@ -81,6 +81,7 @@ KNOWN_DOCS: tuple[str, ...] = (
     "docs/audit_report_2026-05-28.md",
     "docs/audit_report_2026-05-30.md",
     "docs/research_notes/yuga_lexicon_analysis.md",
+    "docs/specs/EPX-G_reclaim.md",
     "RELEASE.md",
 )
 
