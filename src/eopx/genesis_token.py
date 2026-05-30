@@ -251,14 +251,116 @@ GENESIS_SEAL_SIGNED_FIELDS: tuple[str, ...] = (
     "archetype_id",
     "btc_block_height",
     "btc_block_hash_hex",
+    "inscription",
 )
 
-#: Fields that appear in :meth:`GenesisSeal.to_dict` but are intentionally
-#: NOT part of the signed message (signer identity and the signature itself).
+#: Dataclass fields that appear in :meth:`GenesisSeal.to_dict` but are
+#: intentionally NOT part of the signed message (signer identity and the
+#: signature itself). Derived properties (e.g. ``inscription_fp_hex``) are
+#: NOT enumerated here — they are by definition functions of signed fields.
 GENESIS_SEAL_UNSIGNED_FIELDS: tuple[str, ...] = (
     "signer_pk_fp_hex",
     "signature_hex",
 )
+
+
+#: Domain separator for the optional inscription suffix appended to the seal
+#: message. Chosen so it cannot collide with the legacy "no inscription"
+#: encoding: existing v1 seals never had ``INSCRIPTION_V1`` in their signed
+#: bytes, so they remain bit-for-bit verifiable.
+INSCRIPTION_DOMAIN = b"INSCRIPTION_V1"
+
+#: Hard caps for the inscription components. Designed to keep the on-wire
+#: seal small and human-readable; tweaked together with the storage limits
+#: of downstream renderers (badges, posters, NFC tags).
+INSCRIPTION_MAX_NAME_BYTES = 128
+INSCRIPTION_MAX_MOTTO_BYTES = 256
+#: ISO 8601 UTC timestamp with 'Z' suffix; ``2026-05-29T22:14:36Z`` (20 chars).
+INSCRIPTION_ISSUED_AT_RE = (
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+)
+
+
+@dataclass(frozen=True)
+class Inscription:
+    """Human-readable engraving cryptographically bound to a Genesis seal.
+
+    ``name`` and ``issued_at`` are required when an inscription is attached;
+    ``motto`` is optional. All three are signed by the deployment key as part
+    of the seal message, so altering any character invalidates the signature.
+
+    The pair ``(inscription, inscription_fp_hex)`` is designed as the
+    "medal + serial" pattern:
+
+    * ``inscription`` itself is human-readable (visible on the seal export).
+    * ``inscription_fp_hex`` is the SHA3-256 of the canonical inscription
+      bytes — a compact public identifier you can index on (e.g. "look up
+      vault by inscription hash") without parsing the full struct.
+    """
+    name: str
+    issued_at: str
+    motto: str = ""
+
+    def __post_init__(self) -> None:
+        import re
+        if not isinstance(self.name, str) or not self.name:
+            raise ValueError("Inscription.name must be a non-empty string")
+        name_bytes = self.name.encode("utf-8")
+        if len(name_bytes) > INSCRIPTION_MAX_NAME_BYTES:
+            raise ValueError(
+                f"Inscription.name too long: {len(name_bytes)} bytes "
+                f"(max {INSCRIPTION_MAX_NAME_BYTES})"
+            )
+        if not isinstance(self.issued_at, str) or not re.match(
+            INSCRIPTION_ISSUED_AT_RE, self.issued_at
+        ):
+            raise ValueError(
+                "Inscription.issued_at must be ISO 8601 UTC with 'Z' "
+                f"suffix (got {self.issued_at!r})"
+            )
+        if not isinstance(self.motto, str):
+            raise ValueError("Inscription.motto must be a string")
+        motto_bytes = self.motto.encode("utf-8")
+        if len(motto_bytes) > INSCRIPTION_MAX_MOTTO_BYTES:
+            raise ValueError(
+                f"Inscription.motto too long: {len(motto_bytes)} bytes "
+                f"(max {INSCRIPTION_MAX_MOTTO_BYTES})"
+            )
+
+    def canonical_bytes(self) -> bytes:
+        """Stable byte encoding used both for signing and fingerprinting.
+
+        Length-prefixed components prevent ambiguity attacks (where
+        concatenated alternative ``(name, motto)`` pairs could share the
+        same flat-string encoding).
+        """
+        def _field(b: bytes) -> bytes:
+            return len(b).to_bytes(4, "big") + b
+        return b"".join((
+            INSCRIPTION_DOMAIN,
+            _field(self.name.encode("utf-8")),
+            _field(self.issued_at.encode("ascii")),
+            _field(self.motto.encode("utf-8")),
+        ))
+
+    def fingerprint(self) -> bytes:
+        """SHA3-256 of :meth:`canonical_bytes`. Suitable as a public index."""
+        return hashlib.sha3_256(self.canonical_bytes()).digest()
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "name": self.name,
+            "issued_at": self.issued_at,
+            "motto": self.motto,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, object]) -> "Inscription":
+        return cls(
+            name=str(d["name"]),
+            issued_at=str(d["issued_at"]),
+            motto=str(d.get("motto", "")),
+        )
 
 
 @dataclass
@@ -272,9 +374,34 @@ class GenesisSeal:
     btc_block_hash_hex: str
     signer_pk_fp_hex: str
     signature_hex: str
+    inscription: Optional[Inscription] = None
+
+    @property
+    def inscription_fp_hex(self) -> Optional[str]:
+        """Hex-encoded SHA3-256 of the engraved inscription (if any).
+
+        Derived deterministically from ``inscription`` — not stored
+        separately to avoid drift.
+        """
+        if self.inscription is None:
+            return None
+        return self.inscription.fingerprint().hex()
 
     def to_dict(self) -> Dict[str, object]:
-        return dataclasses.asdict(self)
+        out: Dict[str, object] = {
+            "schema_version": self.schema_version,
+            "vault_fp_hex": self.vault_fp_hex,
+            "sequence": self.sequence,
+            "archetype_id": self.archetype_id,
+            "btc_block_height": self.btc_block_height,
+            "btc_block_hash_hex": self.btc_block_hash_hex,
+            "signer_pk_fp_hex": self.signer_pk_fp_hex,
+            "signature_hex": self.signature_hex,
+        }
+        if self.inscription is not None:
+            out["inscription"] = self.inscription.to_dict()
+            out["inscription_fp_hex"] = self.inscription_fp_hex
+        return out
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
@@ -285,6 +412,19 @@ class GenesisSeal:
             raise ValueError(
                 f"unsupported schema_version: {d.get('schema_version')}"
             )
+        inscription: Optional[Inscription] = None
+        if d.get("inscription") is not None:
+            inscription = Inscription.from_dict(
+                d["inscription"]  # type: ignore[arg-type]
+            )
+            # If the dict carries an inscription_fp_hex, cross-check it now
+            # so corrupted blobs are rejected at parse time rather than
+            # surfacing as a mysterious verify_genesis_seal failure later.
+            fp_claimed = d.get("inscription_fp_hex")
+            if fp_claimed is not None and str(fp_claimed) != inscription.fingerprint().hex():
+                raise ValueError(
+                    "inscription_fp_hex does not match inscription bytes"
+                )
         return cls(
             schema_version=int(d["schema_version"]),  # type: ignore[arg-type]
             vault_fp_hex=str(d["vault_fp_hex"]),
@@ -294,13 +434,20 @@ class GenesisSeal:
             btc_block_hash_hex=str(d["btc_block_hash_hex"]),
             signer_pk_fp_hex=str(d["signer_pk_fp_hex"]),
             signature_hex=str(d["signature_hex"]),
+            inscription=inscription,
         )
 
 
 def _seal_message(*, vault_fp: bytes, sequence: int, archetype_id: int,
-                    btc_block_height: int, btc_block_hash: bytes) -> bytes:
-    """Canonical message that the deployment key signs."""
-    return b"|".join([
+                    btc_block_height: int, btc_block_hash: bytes,
+                    inscription: Optional[Inscription] = None) -> bytes:
+    """Canonical message that the deployment key signs.
+
+    Old seals (no inscription) produce the legacy v1 bytes verbatim, so
+    pre-existing signatures verify unchanged. New seals with an
+    inscription append a domain-separated, length-prefixed suffix.
+    """
+    base = b"|".join([
         GENESIS_SEAL_INFO,
         str(SCHEMA_VERSION).encode(),
         vault_fp,
@@ -309,6 +456,9 @@ def _seal_message(*, vault_fp: bytes, sequence: int, archetype_id: int,
         str(btc_block_height).encode(),
         btc_block_hash,
     ])
+    if inscription is None:
+        return base
+    return base + b"|" + inscription.canonical_bytes()
 
 
 def mint_genesis_seal(*,
@@ -318,8 +468,14 @@ def mint_genesis_seal(*,
                        btc_block_height: int,
                        positions: List[int],
                        deployment_key: EopxKey,
+                       inscription: Optional[Inscription] = None,
                        ) -> GenesisSeal:
     """Produce a verifiable Genesis seal for a Genesis vault.
+
+    Pass ``inscription`` to engrave a human-readable name + ISO 8601 date
+    (and optional motto) into the signed payload. The inscription is bound
+    to the Dilithium signature, so altering any character invalidates the
+    seal.
 
     Raises ``ValueError`` if ``sequence`` is not in ``positions``.
     """
@@ -336,6 +492,7 @@ def mint_genesis_seal(*,
         archetype_id=archetype.id,
         btc_block_height=btc_block_height,
         btc_block_hash=btc_block_hash,
+        inscription=inscription,
     )
     sig = deployment_key.sign(msg)
     return GenesisSeal(
@@ -348,6 +505,7 @@ def mint_genesis_seal(*,
         signer_pk_fp_hex=hashlib.sha3_256(
             deployment_key.dilithium_pk).hexdigest(),
         signature_hex=sig.hex(),
+        inscription=inscription,
     )
 
 
@@ -382,6 +540,7 @@ def verify_genesis_seal(seal: GenesisSeal,
         archetype_id=seal.archetype_id,
         btc_block_height=seal.btc_block_height,
         btc_block_hash=bytes.fromhex(seal.btc_block_hash_hex),
+        inscription=seal.inscription,
     )
     try:
         sig = bytes.fromhex(seal.signature_hex)
@@ -438,7 +597,10 @@ def archetypes_commitment_hex() -> str:
 __all__ = [
     "SCHEMA_VERSION",
     "TOTAL_GENESIS", "TOTAL_VAULTS", "GENESIS_WINDOW", "BTC_BLOCK_TARGET",
-    "Archetype", "GenesisSeal",
+    "Archetype", "GenesisSeal", "Inscription",
+    "GENESIS_SEAL_SIGNED_FIELDS", "GENESIS_SEAL_UNSIGNED_FIELDS",
+    "INSCRIPTION_DOMAIN",
+    "INSCRIPTION_MAX_NAME_BYTES", "INSCRIPTION_MAX_MOTTO_BYTES",
     "LATTICE_PATTERNS", "LATTICE_ELEMENTS",
     "all_archetypes", "archetype_of", "archetype_for_sequence",
     "derive_positions", "is_genesis",

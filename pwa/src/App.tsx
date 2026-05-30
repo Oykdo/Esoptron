@@ -229,7 +229,13 @@ export default function App() {
             your Metatron card so we can re-derive your enrollment
             locally.
           </p>
-          <CameraScanner onCapture={onCapture} />
+          <CameraScanner
+            onCapture={onCapture}
+            onBack={() => {
+              setRestored(null);
+              setPhase("restore");
+            }}
+          />
         </section>
       )}
 
@@ -255,7 +261,10 @@ export default function App() {
       {phase === "scan" && (
         <section>
           <h2>Scan a Metatron card</h2>
-          <CameraScanner onCapture={onCapture} />
+          <CameraScanner
+            onCapture={onCapture}
+            onBack={() => setPhase("welcome")}
+          />
         </section>
       )}
 

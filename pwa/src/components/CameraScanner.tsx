@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 interface Props {
   onCapture: (blob: Blob) => void;
+  onBack?: () => void;
   disabled?: boolean;
 }
 
@@ -13,7 +14,7 @@ interface Props {
  * detection on every frame and snap automatically when the 4 markers
  * are stable.
  */
-export function CameraScanner({ onCapture, disabled }: Props) {
+export function CameraScanner({ onCapture, onBack, disabled }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -81,6 +82,16 @@ export function CameraScanner({ onCapture, disabled }: Props) {
 
   return (
     <div className="camera-scanner">
+      {onBack && (
+        <button
+          type="button"
+          className="secondary back-button"
+          onClick={onBack}
+          disabled={disabled}
+        >
+          Back
+        </button>
+      )}
       <div className="camera-frame">
         <video ref={videoRef} playsInline muted />
         <div className="camera-reticle" />

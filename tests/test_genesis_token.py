@@ -24,6 +24,9 @@ from eopx.genesis_token import (
     archetypes_commitment_hex,
     derive_positions,
     genesis_commitment,
+    INSCRIPTION_MAX_MOTTO_BYTES,
+    INSCRIPTION_MAX_NAME_BYTES,
+    Inscription,
     is_genesis,
     mint_genesis_seal,
     verify_genesis_seal,
@@ -333,3 +336,260 @@ def test_genesis_seal_canonical_fields_enumeration():
     assert set(GENESIS_SEAL_SIGNED_FIELDS).isdisjoint(
         set(GENESIS_SEAL_UNSIGNED_FIELDS)
     )
+
+
+# ---------------------------------------------------------------------------
+# Inscription — engrave a human-readable name + date into the signed seal.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def inscription_alice() -> Inscription:
+    return Inscription(
+        name="Alice's Vault",
+        issued_at="2026-05-29T22:14:36Z",
+        motto="Custodes mei",
+    )
+
+
+class TestInscription:
+    def test_validates_name_required(self):
+        with pytest.raises(ValueError, match="name"):
+            Inscription(name="", issued_at="2026-05-29T22:14:36Z")
+
+    def test_validates_issued_at_format(self):
+        with pytest.raises(ValueError, match="issued_at"):
+            Inscription(name="x", issued_at="May 29 2026")
+        with pytest.raises(ValueError, match="issued_at"):
+            Inscription(name="x", issued_at="2026-05-29T22:14:36+02:00")
+
+    def test_validates_name_length(self):
+        too_long = "a" * (INSCRIPTION_MAX_NAME_BYTES + 1)
+        with pytest.raises(ValueError, match="name too long"):
+            Inscription(name=too_long, issued_at="2026-05-29T22:14:36Z")
+
+    def test_validates_motto_length(self):
+        too_long = "m" * (INSCRIPTION_MAX_MOTTO_BYTES + 1)
+        with pytest.raises(ValueError, match="motto too long"):
+            Inscription(
+                name="ok",
+                issued_at="2026-05-29T22:14:36Z",
+                motto=too_long,
+            )
+
+    def test_fingerprint_deterministic(self, inscription_alice):
+        fp1 = inscription_alice.fingerprint()
+        fp2 = Inscription(
+            name="Alice's Vault",
+            issued_at="2026-05-29T22:14:36Z",
+            motto="Custodes mei",
+        ).fingerprint()
+        assert fp1 == fp2
+        assert len(fp1) == 32
+
+    def test_fingerprint_changes_with_any_field(self, inscription_alice):
+        base = inscription_alice.fingerprint()
+        # Changing each field individually must change the hash.
+        assert Inscription(
+            name="Bob's Vault",
+            issued_at=inscription_alice.issued_at,
+            motto=inscription_alice.motto,
+        ).fingerprint() != base
+        assert Inscription(
+            name=inscription_alice.name,
+            issued_at="2027-01-01T00:00:00Z",
+            motto=inscription_alice.motto,
+        ).fingerprint() != base
+        assert Inscription(
+            name=inscription_alice.name,
+            issued_at=inscription_alice.issued_at,
+            motto="Different motto",
+        ).fingerprint() != base
+
+    def test_canonical_bytes_uses_length_prefix(self):
+        # "ab" + "cd" must hash differently from "a" + "bcd" — length prefixes
+        # are what prevent the ambiguity.
+        a = Inscription(name="ab", issued_at="2026-05-29T22:14:36Z", motto="cd")
+        b = Inscription(name="a", issued_at="2026-05-29T22:14:36Z", motto="bcd")
+        assert a.fingerprint() != b.fingerprint()
+
+    def test_roundtrip_dict(self, inscription_alice):
+        d = inscription_alice.to_dict()
+        restored = Inscription.from_dict(d)
+        assert restored == inscription_alice
+
+
+class TestSealWithInscription:
+    def test_mint_with_inscription_verifies(
+        self, btc_hash, positions, deployment_key, inscription_alice
+    ):
+        seal = mint_genesis_seal(
+            vault_fp=b"\xee" * 32,
+            sequence=positions[0],
+            btc_block_hash=btc_hash,
+            btc_block_height=BTC_BLOCK_TARGET,
+            positions=positions,
+            deployment_key=deployment_key,
+            inscription=inscription_alice,
+        )
+        assert seal.inscription == inscription_alice
+        assert seal.inscription_fp_hex == inscription_alice.fingerprint().hex()
+        assert verify_genesis_seal(
+            seal,
+            deployment_pk=deployment_key.dilithium_pk,
+            positions=positions,
+        )
+
+    def test_tampered_name_breaks_signature(
+        self, btc_hash, positions, deployment_key, inscription_alice
+    ):
+        seal = mint_genesis_seal(
+            vault_fp=b"\xee" * 32,
+            sequence=positions[0],
+            btc_block_hash=btc_hash,
+            btc_block_height=BTC_BLOCK_TARGET,
+            positions=positions,
+            deployment_key=deployment_key,
+            inscription=inscription_alice,
+        )
+        # Replace inscription with a forged name; signature must reject.
+        seal.inscription = Inscription(
+            name="Eve's Vault",
+            issued_at=inscription_alice.issued_at,
+            motto=inscription_alice.motto,
+        )
+        assert not verify_genesis_seal(
+            seal,
+            deployment_pk=deployment_key.dilithium_pk,
+            positions=positions,
+        )
+
+    def test_tampered_date_breaks_signature(
+        self, btc_hash, positions, deployment_key, inscription_alice
+    ):
+        seal = mint_genesis_seal(
+            vault_fp=b"\xee" * 32,
+            sequence=positions[0],
+            btc_block_hash=btc_hash,
+            btc_block_height=BTC_BLOCK_TARGET,
+            positions=positions,
+            deployment_key=deployment_key,
+            inscription=inscription_alice,
+        )
+        seal.inscription = Inscription(
+            name=inscription_alice.name,
+            issued_at="2027-01-01T00:00:00Z",
+            motto=inscription_alice.motto,
+        )
+        assert not verify_genesis_seal(
+            seal,
+            deployment_pk=deployment_key.dilithium_pk,
+            positions=positions,
+        )
+
+    def test_removing_inscription_breaks_signature(
+        self, btc_hash, positions, deployment_key, inscription_alice
+    ):
+        seal = mint_genesis_seal(
+            vault_fp=b"\xee" * 32,
+            sequence=positions[0],
+            btc_block_hash=btc_hash,
+            btc_block_height=BTC_BLOCK_TARGET,
+            positions=positions,
+            deployment_key=deployment_key,
+            inscription=inscription_alice,
+        )
+        seal.inscription = None
+        assert not verify_genesis_seal(
+            seal,
+            deployment_pk=deployment_key.dilithium_pk,
+            positions=positions,
+        )
+
+    def test_adding_inscription_after_mint_breaks_signature(
+        self, btc_hash, positions, deployment_key, inscription_alice
+    ):
+        # Mint WITHOUT inscription, then try to graft one in post-hoc.
+        seal = mint_genesis_seal(
+            vault_fp=b"\xee" * 32,
+            sequence=positions[0],
+            btc_block_hash=btc_hash,
+            btc_block_height=BTC_BLOCK_TARGET,
+            positions=positions,
+            deployment_key=deployment_key,
+        )
+        assert verify_genesis_seal(
+            seal,
+            deployment_pk=deployment_key.dilithium_pk,
+            positions=positions,
+        )
+        seal.inscription = inscription_alice
+        assert not verify_genesis_seal(
+            seal,
+            deployment_pk=deployment_key.dilithium_pk,
+            positions=positions,
+        )
+
+    def test_legacy_seal_without_inscription_still_verifies(
+        self, btc_hash, positions, deployment_key
+    ):
+        """Backward compat: minting WITHOUT inscription must produce the
+        exact same signed bytes as before the feature landed.
+        """
+        seal = mint_genesis_seal(
+            vault_fp=b"\xee" * 32,
+            sequence=positions[0],
+            btc_block_hash=btc_hash,
+            btc_block_height=BTC_BLOCK_TARGET,
+            positions=positions,
+            deployment_key=deployment_key,
+        )
+        assert seal.inscription is None
+        assert seal.inscription_fp_hex is None
+        assert "inscription" not in seal.to_dict()
+        assert "inscription_fp_hex" not in seal.to_dict()
+        assert verify_genesis_seal(
+            seal,
+            deployment_pk=deployment_key.dilithium_pk,
+            positions=positions,
+        )
+
+    def test_json_roundtrip_preserves_inscription(
+        self, btc_hash, positions, deployment_key, inscription_alice
+    ):
+        from eopx.genesis_token import GenesisSeal
+        seal = mint_genesis_seal(
+            vault_fp=b"\xee" * 32,
+            sequence=positions[0],
+            btc_block_hash=btc_hash,
+            btc_block_height=BTC_BLOCK_TARGET,
+            positions=positions,
+            deployment_key=deployment_key,
+            inscription=inscription_alice,
+        )
+        blob = seal.to_json()
+        restored = GenesisSeal.from_dict(json.loads(blob))
+        assert restored.inscription == inscription_alice
+        assert verify_genesis_seal(
+            restored,
+            deployment_pk=deployment_key.dilithium_pk,
+            positions=positions,
+        )
+
+    def test_from_dict_rejects_corrupt_fp(
+        self, btc_hash, positions, deployment_key, inscription_alice
+    ):
+        from eopx.genesis_token import GenesisSeal
+        seal = mint_genesis_seal(
+            vault_fp=b"\xee" * 32,
+            sequence=positions[0],
+            btc_block_hash=btc_hash,
+            btc_block_height=BTC_BLOCK_TARGET,
+            positions=positions,
+            deployment_key=deployment_key,
+            inscription=inscription_alice,
+        )
+        d = seal.to_dict()
+        d["inscription_fp_hex"] = "00" * 32  # wrong hash
+        with pytest.raises(ValueError, match="inscription_fp_hex"):
+            GenesisSeal.from_dict(d)
