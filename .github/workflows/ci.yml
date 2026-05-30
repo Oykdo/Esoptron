@@ -28,6 +28,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,server]"
+      - name: Encoding check (UTF-8 + LF)
+        run: python tools/check_encoding.py
+      - name: Spec manifest verify
+        run: python tools/verify_spec.py --all
       - name: Run tests
         run: python -m pytest -q
 

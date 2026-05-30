@@ -1,0 +1,43 @@
+# Default: treat text files as text with LF line endings checked into git.
+* text=auto eol=lf
+
+# Source files: always LF, always UTF-8.
+*.py     text working-tree-encoding=UTF-8 eol=lf
+*.ts     text working-tree-encoding=UTF-8 eol=lf
+*.tsx    text working-tree-encoding=UTF-8 eol=lf
+*.js     text working-tree-encoding=UTF-8 eol=lf
+*.jsx    text working-tree-encoding=UTF-8 eol=lf
+*.json   text working-tree-encoding=UTF-8 eol=lf
+*.md     text working-tree-encoding=UTF-8 eol=lf
+*.yml    text working-tree-encoding=UTF-8 eol=lf
+*.yaml   text working-tree-encoding=UTF-8 eol=lf
+*.toml   text working-tree-encoding=UTF-8 eol=lf
+*.cfg    text working-tree-encoding=UTF-8 eol=lf
+*.ini    text working-tree-encoding=UTF-8 eol=lf
+*.txt    text working-tree-encoding=UTF-8 eol=lf
+*.sh     text working-tree-encoding=UTF-8 eol=lf
+
+# Spec integrity manifest: never CRLF, ever.
+SPECS.SHA3-256 text working-tree-encoding=UTF-8 eol=lf
+
+# Windows shell scripts use CRLF natively.
+*.ps1    text working-tree-encoding=UTF-8 eol=crlf
+*.bat    text working-tree-encoding=UTF-8 eol=crlf
+*.cmd    text working-tree-encoding=UTF-8 eol=crlf
+
+# Binary assets.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
+*.docx   binary
+*.xlsx   binary
+*.zip    binary
+*.tar.gz binary
+*.whl    binary
+
+# Generated / large diffs we don't want shown by default in `git diff`.
+*.lock   linguist-generated=true
+package-lock.json linguist-generated=true
