@@ -49,6 +49,7 @@ from ..genesis_token import (
     derive_positions,
     mint_genesis_seal,
 )
+from ..egg_token import derive_eggs, mint_egg_seal
 from .http_delegate import HTTPDelegateSequenceState, LockServerConfig
 from .rate_limit import rate_limit
 from .sequence_state import SequenceState
@@ -92,6 +93,10 @@ class _DeploymentContext:
             btc_block_height=self.btc_block_height,
         )
         self.positions_set = set(self.positions)
+        # Golden Eggs share the same committed block (EPX-E). Derived once;
+        # a vault landing on an egg position auto-wins it (sealed below).
+        self.eggs = derive_eggs(self.btc_block_hash, self.btc_block_height)
+        self.eggs_by_position = {e.position: e for e in self.eggs}
 
     @classmethod
     def load_or_init(
@@ -182,9 +187,9 @@ class _DeploymentContext:
             "btc_block_hash_hex": self.btc_block_hash_hex,
             "btc_block_height": self.btc_block_height,
             "deployment_pk_hex": self.deployment_key.dilithium_pk.hex(),
-            "deployment_sk_hex": self.deployment_key.dilithium_sk.hex(),
+            "deployment_sk_hex": self.deployment_key.dilithium_sk.hex(),  # pyright: ignore
             "deployment_kyber_pk_hex": self.deployment_key.kyber_pk.hex(),
-            "deployment_kyber_sk_hex": self.deployment_key.kyber_sk.hex(),
+            "deployment_kyber_sk_hex": self.deployment_key.kyber_sk.hex(),  # pyright: ignore
             "archetypes_commitment_hex": archetypes_commitment_hex(),
         }
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
@@ -270,6 +275,22 @@ def create_anchor_api(
                 "council_seat": f"{archetype.id + 1} of 88"
                 if archetype else None,
             }
+
+        # Golden Egg auto-win: if the vault's sequence lands on an egg
+        # position, mint + return its immutable signed seal (EPX-E).
+        won = context.eggs_by_position.get(record.sequence)
+        response["golden_egg"] = bool(won)
+        if won is not None:
+            egg_seal = mint_egg_seal(
+                egg=won,
+                vault_fp=bytes.fromhex(vault_fp_hex),
+                btc_block_hash=context.btc_block_hash,
+                btc_block_height=context.btc_block_height,
+                eggs=context.eggs,
+                deployment_key=context.deployment_key,
+            )
+            response["egg"] = won.to_dict()
+            response["egg_seal"] = egg_seal.to_dict()
         return jsonify(response), 200
 
     @bp.route("/total", methods=["GET"])
@@ -323,6 +344,29 @@ def create_anchor_api(
                 "glyph": archetype.glyph if archetype else None,
                 "color_hue": archetype.color_hue if archetype else None,
             } if archetype else None,
+        }), 200
+
+    @bp.route("/egg/<int:sequence>", methods=["GET"])
+    @rate_limit("default")
+    def egg_by_sequence(sequence: int):
+        won = context.eggs_by_position.get(sequence)
+        if won is None:
+            return jsonify({"error": "sequence is not a golden-egg position"}), 404
+        record = state.lookup_by_sequence(sequence)
+        if record is None:
+            return jsonify({"error": "sequence not yet anchored"}), 404
+        egg_seal = mint_egg_seal(
+            egg=won, vault_fp=bytes.fromhex(record.vault_fp_hex),
+            btc_block_hash=context.btc_block_hash,
+            btc_block_height=context.btc_block_height,
+            eggs=context.eggs, deployment_key=context.deployment_key,
+        )
+        return jsonify({
+            "sequence": sequence,
+            "vault_fp_hex": record.vault_fp_hex,
+            "deployment_pk_hex": context.deployment_key.dilithium_pk.hex(),
+            "egg": won.to_dict(),
+            "egg_seal": egg_seal.to_dict(),
         }), 200
 
     @bp.route("/health", methods=["GET"])

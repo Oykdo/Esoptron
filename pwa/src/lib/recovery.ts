@@ -90,10 +90,12 @@ function parseKdfParams(kdf: string, kind: "card_pin" | "passphrase") {
 }
 
 // Back-compat: legacy `ARGON2_CARD` / `ARGON2_CLOUD` references in tests etc.
-const ARGON2_CARD = ARGON2_PROFILES.workstation.card_pin;
-const ARGON2_CLOUD = ARGON2_PROFILES.workstation.passphrase;
-const KDF_CARD_STR = kdfParamsStr("card_pin", "workstation");
-const KDF_CLOUD_STR = kdfParamsStr("passphrase", "workstation");
+// Exported so they remain available to importers (and don't trip
+// noUnusedLocals as module-private constants).
+export const ARGON2_CARD = ARGON2_PROFILES.workstation.card_pin;
+export const ARGON2_CLOUD = ARGON2_PROFILES.workstation.passphrase;
+export const KDF_CARD_STR = kdfParamsStr("card_pin", "workstation");
+export const KDF_CLOUD_STR = kdfParamsStr("passphrase", "workstation");
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 

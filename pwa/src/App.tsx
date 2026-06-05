@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CameraScanner } from "./components/CameraScanner";
 import { RecoverySetup, RecoverySetupResult } from "./components/RecoverySetup";
 import { RecoveryRestore, RecoveryRestoreResult } from "./components/RecoveryRestore";
+import { RelicsGallery } from "./components/RelicsGallery";
 import { EsoptronApi, EsoptronApiError } from "./lib/api";
 import { enrollFromCard, toHexRecord } from "./lib/enrollment";
 import { toHex } from "./lib/crypto";
@@ -24,9 +25,12 @@ type Phase =
   | "restore-rescan"
   | "passphrase"
   | "ready"
+  | "codex"
   | "error";
 
 const api = new EsoptronApi();
+
+type Lang = "fr" | "en";
 
 interface EnrollmentSession {
   symbols: number[];
@@ -51,6 +55,14 @@ export default function App() {
   const [recovery, setRecovery] = useState<RecoverySetupResult | null>(null);
   const [restored, setRestored] = useState<RecoveryRestoreResult | null>(null);
   const [stored, setStored] = useState<StoredEnrollment | null>(null);
+  const [lang, setLang] = useState<Lang>(
+    () => (localStorage.getItem("eopx_lang") as Lang) || "fr",
+  );
+  const t = (fr: string, en: string) => (lang === "fr" ? fr : en);
+
+  useEffect(() => {
+    localStorage.setItem("eopx_lang", lang);
+  }, [lang]);
 
   useEffect(() => {
     void (async () => {
@@ -58,7 +70,8 @@ export default function App() {
         await api.health();
       } catch {
         setPhase("error");
-        setErrMsg("Backend API unreachable. Start the server first.");
+        setErrMsg(t("Esoptron est injoignable pour le moment.",
+          "Can't reach Esoptron right now."));
         return;
       }
       const has = await hasStoredEnrollment();
@@ -188,34 +201,81 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>Esoptron</h1>
-        <p className="subtitle">Visual Vault Identity — Holographic Recovery</p>
+        <button
+          className="link lang-toggle header-lang"
+          onClick={() => setLang(lang === "fr" ? "en" : "fr")}
+        >
+          {lang === "fr" ? "EN" : "FR"}
+        </button>
+        <h1><span className="brand-dot" aria-hidden="true" />Esoptron</h1>
+        <p className="subtitle">
+          {t("Votre coffre, en image vivante.", "Your vault, as a living image.")}
+        </p>
       </header>
 
       {errMsg && <div className="error banner">{errMsg}</div>}
 
-      {phase === "loading" && <p>Connecting to backend…</p>}
+      {phase === "loading" && (
+        <p className="muted">{t("Connexion…", "Connecting…")}</p>
+      )}
 
       {phase === "welcome" && (
         <section className="welcome">
-          <h2>Welcome</h2>
-          <p>
-            Point your camera at a Metatron card to enroll. After
-            scanning, your vault will be split into 3 encrypted shares
-            with a 2-of-3 threshold — no 24-word phrase to write down,
-            no single point of failure.
+          <p className="lead">
+            {t("Votre coffre, en image.", "Your vault, as an image.")}
           </p>
+          <p className="muted">
+            {t("Esoptron transforme l'identité d'un coffre en carte Metatron scannable, signée post-quantique.",
+              "Esoptron turns a vault identity into a scannable, post-quantum-signed Metatron card.")}
+          </p>
+
+          <details className="how">
+            <summary>{t("Comment ça marche", "How it works")}</summary>
+            <ol>
+              <li>
+                {t("Votre coffre Eidolon (.psnx + .blend_data) est la racine — votre vraie identité.",
+                  "Your Eidolon vault (.psnx + .blend_data) is the root — your real identity.")}
+              </li>
+              <li>
+                {t("Esoptron en fait un badge : la carte Metatron, vérifiable hors-ligne.",
+                  "Esoptron makes it a badge: the Metatron card, verifiable offline.")}
+              </li>
+              <li>
+                {t("Ici, vous scannez, vérifiez, et explorez le Codex et votre œuf.",
+                  "Here you scan, verify, and explore the Codex and your egg.")}
+              </li>
+            </ol>
+            <p className="muted how-note">
+              {t("Pas encore de coffre Eidolon ? Scannez une carte pour créer une identité autonome.",
+                "No Eidolon vault yet? Scan a card to create a standalone identity.")}
+            </p>
+          </details>
+
           <button className="primary" onClick={() => setPhase("scan")}>
-            New enrollment — scan a card
+            {t("Scanner une carte", "Scan a card")}
           </button>
           <button onClick={() => setPhase("restore")}>
-            Restore — I have a recovery package
+            {t("Restaurer depuis un paquet", "Restore from a package")}
+          </button>
+          <button className="link" onClick={() => setPhase("codex")}>
+            {t("✦ Explorer le Codex", "✦ Explore the Codex")}
           </button>
         </section>
       )}
 
+      {phase === "codex" && (
+        <RelicsGallery
+          api={api}
+          lang={lang}
+          onLangChange={setLang}
+          onBack={() => setPhase(stored ? "ready" : "welcome")}
+          deviceSecretHex={stored?.device_secret_hex}
+        />
+      )}
+
       {phase === "restore" && (
         <RecoveryRestore
+          lang={lang}
           onRecovered={onRestoreRecovered}
           onCancel={() => setPhase("welcome")}
         />
@@ -223,11 +283,10 @@ export default function App() {
 
       {phase === "restore-rescan" && (
         <section>
-          <h2>Re-scan your card</h2>
-          <p>
-            Recovery shares are reconstructed. Now point the camera at
-            your Metatron card so we can re-derive your enrollment
-            locally.
+          <h2>{t("Re-scannez votre carte", "Re-scan your card")}</h2>
+          <p className="muted">
+            {t("Vos parts de récupération sont reconstituées. Présentez votre carte Metatron pour re-dériver votre enrôlement, en local.",
+              "Recovery shares reconstructed. Point the camera at your Metatron card to re-derive your enrollment locally.")}
           </p>
           <CameraScanner
             onCapture={onCapture}
@@ -241,26 +300,26 @@ export default function App() {
 
       {phase === "unlock" && (
         <section>
-          <h2>Unlock</h2>
-          <p>Enter the passphrase you set when you enrolled.</p>
+          <h2>{t("Déverrouiller", "Unlock")}</h2>
+          <p className="muted">{t("Entrez votre passphrase.", "Enter your passphrase.")}</p>
           <input
             type="password"
             value={unlockPassphrase}
             onChange={(e) => setUnlockPassphrase(e.target.value)}
-            placeholder="passphrase"
+            placeholder={t("passphrase", "passphrase")}
           />
           <button className="primary" onClick={onUnlockSubmit}>
-            Unlock
+            {t("Déverrouiller", "Unlock")}
           </button>
           <button className="link" onClick={onReset}>
-            Reset (lose this enrollment)
+            {t("Réinitialiser (perdre cet enrôlement)", "Reset (lose this enrollment)")}
           </button>
         </section>
       )}
 
       {phase === "scan" && (
         <section>
-          <h2>Scan a Metatron card</h2>
+          <h2>{t("Scanner une carte Metatron", "Scan a Metatron card")}</h2>
           <CameraScanner
             onCapture={onCapture}
             onBack={() => setPhase("welcome")}
@@ -270,8 +329,11 @@ export default function App() {
 
       {phase === "scanning" && (
         <section>
-          <h2>Decoding…</h2>
-          <p>Extracting symbols, then deriving locally.</p>
+          <h2>{t("Lecture…", "Reading…")}</h2>
+          <p className="muted">
+            {t("Décodage des symboles, dérivation sur votre appareil.",
+              "Decoding the symbols, deriving on your device.")}
+          </p>
         </section>
       )}
 
@@ -285,62 +347,63 @@ export default function App() {
 
       {phase === "passphrase" && (
         <section>
-          <h2>Protect your local store</h2>
-          <p>
-            This passphrase encrypts the local enrollment on this device
-            (IndexedDB, AES-GCM). It is independent from the recovery
-            credentials {restored ? "you just used" : "you just set up"}.
+          <h2>{t("Verrouiller cet appareil", "Lock this device")}</h2>
+          <p className="muted">
+            {t("Une passphrase pour chiffrer votre enrôlement ici — indépendante de votre récupération.",
+              "A passphrase to encrypt your enrollment here — separate from your recovery.")}
           </p>
           <input
             type="password"
             value={passphrase}
             onChange={(e) => setPassphrase(e.target.value)}
-            placeholder="passphrase (≥ 8 chars)"
+            placeholder={t("passphrase (≥ 8 caractères)", "passphrase (≥ 8 chars)")}
           />
           <input
             type="password"
             value={passphraseConfirm}
             onChange={(e) => setPassphraseConfirm(e.target.value)}
-            placeholder="confirm passphrase"
+            placeholder={t("confirmer la passphrase", "confirm passphrase")}
           />
           <button className="primary" onClick={onPassphraseSubmit}>
-            Save
+            {t("Enregistrer", "Save")}
           </button>
         </section>
       )}
 
       {phase === "ready" && stored && (
         <section className="ready">
-          <h2>Enrolled</h2>
+          <h2>{t("Enrôlé", "Enrolled")}</h2>
           <dl>
-            <dt>Vault</dt>
+            <dt>{t("Coffre", "Vault")}</dt>
             <dd>{stored.vault_fp_hex.slice(0, 16)}…</dd>
-            <dt>Enrollment</dt>
+            <dt>{t("Enrôlement", "Enrollment")}</dt>
             <dd>{stored.enrollment_fp_hex.slice(0, 16)}…</dd>
-            <dt>Public tag</dt>
+            <dt>{t("Étiquette", "Public tag")}</dt>
             <dd>{stored.public_tag_hex}</dd>
-            <dt>Created</dt>
+            <dt>{t("Créé le", "Created")}</dt>
             <dd>{stored.created_at}</dd>
             {stored.recovery_group_id && (
               <>
-                <dt>Recovery group</dt>
+                <dt>{t("Groupe de récup.", "Recovery group")}</dt>
                 <dd>{stored.recovery_group_id.slice(0, 16)}…</dd>
               </>
             )}
           </dl>
+          <button className="secondary" onClick={() => setPhase("codex")}>
+            {t("✦ Explorer le Codex", "✦ Explore the Codex")}
+          </button>
           <button className="link" onClick={onReset}>
-            Sign out and wipe enrollment
+            {t("Se déconnecter et effacer l'enrôlement", "Sign out and wipe enrollment")}
           </button>
         </section>
       )}
 
       {phase === "error" && (
         <section>
-          <h2>Backend unreachable</h2>
-          <p>
-            Start the Esoptron API with{" "}
-            <code>py scripts/serve_pwa_api.py --cors http://localhost:5173</code>{" "}
-            and reload this page.
+          <h2>{t("Esoptron est injoignable", "Can't reach Esoptron")}</h2>
+          <p className="muted">
+            {t("Le service ne répond pas. Vérifiez votre connexion et rechargez.",
+              "The service isn't responding. Check your connection and reload.")}
           </p>
         </section>
       )}

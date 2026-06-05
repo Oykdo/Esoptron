@@ -1,4 +1,4 @@
-"""Generate a print-ready A4 sheet (300 DPI) carrying a Metatron cube.
+r"""Generate a print-ready A4 sheet (300 DPI) carrying a Metatron cube.
 
 Usage examples
 --------------
@@ -33,7 +33,6 @@ Single 2480 x 3508 px PNG (A4 at 300 DPI), portrait, white background. Layout:
 from __future__ import annotations
 
 import argparse
-import datetime as _dt
 import hashlib
 import os
 import secrets
@@ -51,6 +50,7 @@ try:
     import cv2  # used to generate real ArUco markers
     _HAS_CV2 = True
 except Exception:
+    cv2 = None  # type: ignore[assignment]
     _HAS_CV2 = False
 
 # ---------- A4 @ 300 DPI ----------
@@ -80,7 +80,8 @@ def mm(x_mm: float) -> int:
     return int(round(x_mm / MM_PER_INCH * DPI))
 
 
-def load_font(size_px: int, mono: bool = False) -> ImageFont.ImageFont:
+def load_font(size_px: int, mono: bool = False
+              ) -> "ImageFont.FreeTypeFont | ImageFont.ImageFont":
     """Best-effort font loader. Falls back to PIL default if nothing is found."""
     candidates_sans = [
         "C:/Windows/Fonts/segoeui.ttf",
@@ -119,7 +120,6 @@ def aruco_outer_corners() -> dict:
     AWAY from the page center for each ID (TL=top-left, TR=top-right, etc.).
     These act as 4 known correspondences for the photo->A4 homography.
     """
-    s = mm(FIDUCIAL_MM)
     inset = mm(FIDUCIAL_INSET_MM)
     return {
         0: (inset,                inset),               # TL outer
@@ -192,7 +192,7 @@ def draw_corner_fiducial(img: Image.Image,
         fill=BG,
     )
 
-    if not _HAS_CV2:
+    if not _HAS_CV2 or cv2 is None:
         d.rectangle((x, y, x + side, y + side), fill=INK)
         return
 
@@ -211,29 +211,6 @@ def draw_corner_fiducial(img: Image.Image,
         (x - frame_w, y - frame_w, x + side + frame_w, y + side + frame_w),
         outline=INK, width=frame_w,
     )
-
-
-def _draw_cube_aruco(img: Image.Image, x: int, y: int, side: int,
-                      marker_id: int, quiet_px: int) -> None:
-    """Draw a cube-adjacent ArUco marker with generous quiet zone and NO black frame.
-
-    The frame around the marker (from draw_corner_fiducial) can confuse
-    OpenCV detection. This function draws only the marker on a white pad.
-    """
-    d = ImageDraw.Draw(img)
-    # White quiet zone
-    d.rectangle(
-        (x - quiet_px, y - quiet_px, x + side + quiet_px, y + side + quiet_px),
-        fill=BG,
-    )
-    if _HAS_CV2:
-        aruco = cv2.aruco
-        dictionary = aruco.getPredefinedDictionary(getattr(aruco, ARUCO_DICT_NAME))
-        marker = aruco.generateImageMarker(dictionary, marker_id, side, borderBits=1)
-        arr = np.stack([marker, marker, marker], axis=-1)
-        img.paste(Image.fromarray(arr, mode="RGB"), (x, y))
-    else:
-        d.rectangle((x, y, x + side, y + side), fill=INK)
 
 
 # ---------- Crop marks ----------
@@ -261,7 +238,7 @@ def draw_crop_marks(d: ImageDraw.ImageDraw,
 
 def draw_scale_bar(d: ImageDraw.ImageDraw,
                    x: int, y: int, length_mm: float,
-                   font: ImageFont.ImageFont) -> None:
+                   font: "ImageFont.FreeTypeFont | ImageFont.ImageFont") -> None:
     """Horizontal calibration ruler with 10 mm ticks and a 50 mm label."""
     L = mm(length_mm)
     h = mm(3.0)
@@ -278,8 +255,20 @@ def draw_scale_bar(d: ImageDraw.ImageDraw,
 # ---------- The sheet ----------
 
 def make_sheet(symbols, role: str, label: str, hash_hex: str,
-               extra_lines: Optional[list] = None) -> Image.Image:
-    """Compose the full A4 page."""
+               extra_lines: Optional[list] = None,
+               cube_renderer=None, egg=None) -> Image.Image:
+    """Compose the full A4 page.
+
+    cube_renderer:
+        Optional ``callable(symbols, size) -> PIL.Image`` used to draw the
+        central cube. Defaults to ``eopx.metatron.render``. Pass a closure
+        wrapping ``render_seal_revealed`` to emit an EPX-H "seal" badge while
+        keeping the page's validated page-corner ArUco fiducials unchanged.
+    egg:
+        Optional :class:`eopx.egg_token.GoldenEgg` won by this vault. When
+        given, its emblem is engraved in the right margin beside the cube
+        (brand/legend, not security — the signed EggSeal is the real record).
+    """
     img = Image.new("RGB", (PAGE_W, PAGE_H), BG)
     d = ImageDraw.Draw(img)
 
@@ -326,7 +315,7 @@ def make_sheet(symbols, role: str, label: str, hash_hex: str,
     # --- Cube ---
     cube_px = mm(CUBE_SIDE_MM)
     # Render the cube at native printable resolution (~1772 px @ 150 mm @ 300 DPI).
-    cube_img = render(symbols, size=cube_px)
+    cube_img = (cube_renderer or render)(symbols, size=cube_px)
     cube_x = (PAGE_W - cube_px) // 2
     cube_y = banner_y + banner_h + mm(10.0)
     img.paste(cube_img, (cube_x, cube_y))
@@ -335,6 +324,31 @@ def make_sheet(symbols, role: str, label: str, hash_hex: str,
         (cube_x - 2, cube_y - 2, cube_x + cube_px + 2, cube_y + cube_px + 2),
         outline=(140, 140, 140), width=1,
     )
+
+    # --- Golden-egg emblem (engraved in the right margin when won) ---
+    if egg is not None:
+        from eopx.metatron.egg_emblem import render_egg_emblem
+        em_px = mm(30.0)
+        em_x = cube_x + cube_px + mm(7.0)
+        em_y = cube_y + (cube_px - em_px) // 2
+        # The corner fiducials sit at top/bottom; the emblem is at the cube's
+        # mid-height, so it only needs to clear the right safe margin.
+        if em_x + em_px <= PAGE_W - inset:
+            emblem = render_egg_emblem(egg, size=em_px)
+            img.paste(emblem, (em_x, em_y), emblem)  # RGBA alpha mask
+            tag_font = load_font(mm(2.8))
+            tag = "GOLDEN EGG WON"
+            d.text((em_x, em_y - mm(4.5)), tag, font=tag_font, fill=(150, 120, 0))
+            # Strip the tier glyph from the name: this line uses the page's
+            # latin font, which may lack ☾/✦/◈/▣/✸ (the emblem itself carries
+            # the glyph in a symbol font).
+            name = getattr(egg, "name", "")
+            glyph = getattr(egg, "glyph", "")
+            if glyph:
+                name = name.replace(glyph, "").replace("  ", " ").strip()
+            name_font = load_font(mm(2.2))
+            d.text((em_x, em_y + em_px + mm(1.0)),
+                   name, font=name_font, fill=SOFT)
 
     # --- Cube-adjacent ArUco markers (DISABLED: not reliably detected by OpenCV) ---
     # These would provide local rectification but OpenCV fails to detect them
@@ -377,10 +391,6 @@ def make_sheet(symbols, role: str, label: str, hash_hex: str,
     warn_y_estimate = PAGE_H - inset - fid_side - mm(14.0)
     if grid_y + grid_h + mm(2.0) < warn_y_estimate:
         render_grid_on_a4(img, symbols, grid_y, grid_x, grid_cell_px)
-        # Store grid rect for detection
-        grid_rect = (grid_x, grid_y, grid_w, grid_h)
-    else:
-        grid_rect = None
 
     # --- Bottom warning strip for PRIVATE ---
     if is_private:
@@ -445,6 +455,38 @@ def _resolve_inputs(args) -> Tuple[list, str, str, str]:
     )
 
 
+# ---------- Golden-egg resolution ----------
+
+def _resolve_egg(vault_hex: str):
+    """Compute the Golden Egg a vault wins from the committed Genesis block.
+
+    Reads ``ESOPTRON_BTC_BLOCK_HASH`` / ``ESOPTRON_BTC_BLOCK_HEIGHT`` (the
+    committed block, see ``docs/GENESIS_COMMITMENT.md``). Exits with a clear
+    message if no block is committed.
+    """
+    from eopx.egg_token import founder_egg
+
+    blk = os.environ.get("ESOPTRON_BTC_BLOCK_HASH", "").strip()
+    if not blk:
+        raise SystemExit(
+            "--egg-vault needs a committed Genesis block: set "
+            "ESOPTRON_BTC_BLOCK_HASH (and ESOPTRON_BTC_BLOCK_HEIGHT)."
+        )
+    try:
+        block = bytes.fromhex(blk)
+    except ValueError:
+        raise SystemExit("ESOPTRON_BTC_BLOCK_HASH must be valid hex")
+    if len(block) != 32:
+        raise SystemExit("ESOPTRON_BTC_BLOCK_HASH must be 32 bytes (64 hex)")
+    h = os.environ.get("ESOPTRON_BTC_BLOCK_HEIGHT", "").strip()
+    height = int(h) if h.isdigit() else 900_000
+    try:
+        vault_fp = bytes.fromhex(vault_hex.strip())
+    except ValueError:
+        raise SystemExit("--egg-vault must be a hex vault fingerprint")
+    return founder_egg(vault_fp, block, height)
+
+
 # ---------- CLI ----------
 
 def main(argv: list[str]) -> int:
@@ -452,7 +494,7 @@ def main(argv: list[str]) -> int:
         prog="print_sheet",
         description="Generate a print-ready A4 sheet (300 DPI) carrying a Metatron cube.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent(__doc__).strip(),
+        epilog=textwrap.dedent(__doc__ or "").strip(),
     )
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--seed", help="32-byte secret seed in hex (private inscription)")
@@ -464,11 +506,16 @@ def main(argv: list[str]) -> int:
                    help="Determines banner, encoder path, and warning strip.")
     p.add_argument("--out", required=True, help="Output PNG path (A4 @ 300 DPI).")
     p.add_argument("--pdf", help="Optional secondary PDF output (uses Pillow's PDF writer).")
+    p.add_argument("--egg-vault", metavar="HEX",
+                   help="64-hex vault fingerprint: engrave the Golden Egg this "
+                        "vault wins from the committed Genesis block "
+                        "(needs ESOPTRON_BTC_BLOCK_HASH / _HEIGHT).")
     args = p.parse_args(argv[1:])
 
     symbols, role, hash_hex, label = _resolve_inputs(args)
 
-    img = make_sheet(symbols, role, label, hash_hex)
+    egg = _resolve_egg(args.egg_vault) if args.egg_vault else None
+    img = make_sheet(symbols, role, label, hash_hex, egg=egg)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

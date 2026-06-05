@@ -140,6 +140,84 @@ def create_pwa_api(url_prefix: str = "/api/v1") -> Blueprint:
             "secret_reveal_header": REVEAL_HEADER,
         })
 
+    @bp.route("/codex", methods=["GET"])
+    @rate_limit("default")
+    def codex():
+        """Public manifest of the Esoptron Codex (EPX-C).
+
+        Returns the curated relic catalog and its tamper-evident
+        commitment. When the deployment has committed to a Genesis
+        Bitcoin block (``ESOPTRON_BTC_BLOCK_HASH`` / ``_HEIGHT``), the
+        deterministic founder-window distribution is included too. No
+        secrets, no per-vault ownership — those live in the artifact
+        anchor.
+        """
+        import os as _os
+
+        from ..collection import codex_manifest
+
+        btc_hash = None
+        height = 900_000
+        btc_hex = _os.environ.get("ESOPTRON_BTC_BLOCK_HASH", "").strip()
+        if btc_hex:
+            try:
+                candidate = bytes.fromhex(btc_hex)
+            except ValueError:
+                candidate = b""
+            if len(candidate) == 32:
+                btc_hash = candidate
+                h = _os.environ.get("ESOPTRON_BTC_BLOCK_HEIGHT", "").strip()
+                if h.isdigit():
+                    height = int(h)
+        return jsonify(codex_manifest(btc_hash, height))
+
+    @bp.route("/egg/<vault_id_hex>", methods=["GET"])
+    @rate_limit("default")
+    def egg(vault_id_hex: str):
+        """The golden egg attributed to a founder vault (public record).
+
+        Deterministic from the committed Genesis block (or a labelled demo
+        block until one is committed) + a verifiable fair draw. Returns the
+        public egg identity (id / number / tier / glyph / name / position /
+        hash); the immutable signed seal is applied by the deployment key on
+        the anchor, separately.
+        """
+        import hashlib as _hl
+        import os as _os
+
+        from .. import egg_token as _egg
+
+        try:
+            vault_fp = bytes.fromhex(vault_id_hex)
+        except ValueError:
+            return _bad_request("vault_id must be hex")
+        if len(vault_fp) != 32:
+            return _bad_request("vault_id must be 32 bytes")
+
+        btc_hex = _os.environ.get("ESOPTRON_BTC_BLOCK_HASH", "").strip()
+        committed = False
+        block = _hl.sha3_256(b"esoptron.golden_egg.demo.block").digest()
+        height = 900_000
+        if btc_hex:
+            try:
+                candidate = bytes.fromhex(btc_hex)
+            except ValueError:
+                candidate = b""
+            if len(candidate) == 32:
+                block = candidate
+                committed = True
+                h = _os.environ.get("ESOPTRON_BTC_BLOCK_HEIGHT", "").strip()
+                if h.isdigit():
+                    height = int(h)
+
+        won = _egg.founder_egg(vault_fp, block, height)
+        return jsonify({
+            "vault_fp_hex": vault_id_hex.lower(),
+            "egg": won.to_dict(),
+            "btc_block_height": height,
+            "committed": committed,
+        })
+
     @bp.route("/scan", methods=["POST"])
     @rate_limit("heavy")
     def scan():

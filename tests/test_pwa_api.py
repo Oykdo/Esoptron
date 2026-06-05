@@ -58,6 +58,39 @@ def _patch_scan(monkeypatch, canned: ScanResult) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Codex (EPX-C) endpoint
+# ---------------------------------------------------------------------------
+
+class TestCodexEndpoint:
+    def test_codex_returns_catalog_without_btc(self, client, monkeypatch):
+        monkeypatch.delenv("ESOPTRON_BTC_BLOCK_HASH", raising=False)
+        r = client.get("/api/v1/codex")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["count"] == 12
+        assert len(body["relics"]) == 12
+        assert len(body["catalog_commitment_hex"]) == 64
+        # No committed block ⇒ no distribution leaked.
+        assert "distribution" not in body
+
+    def test_codex_includes_distribution_with_btc(self, client, monkeypatch):
+        monkeypatch.setenv("ESOPTRON_BTC_BLOCK_HASH", "00" * 31 + "07")
+        monkeypatch.setenv("ESOPTRON_BTC_BLOCK_HEIGHT", "900000")
+        r = client.get("/api/v1/codex")
+        body = r.get_json()
+        assert len(body["distribution"]) == 12
+        founders = {d["vault_sequence"] for d in body["distribution"]
+                    if d["placement"] == "founder"}
+        assert founders == {1, 2, 3}
+
+    def test_codex_ignores_bad_btc_hash(self, client, monkeypatch):
+        monkeypatch.setenv("ESOPTRON_BTC_BLOCK_HASH", "not-hex")
+        r = client.get("/api/v1/codex")
+        assert r.status_code == 200
+        assert "distribution" not in r.get_json()
+
+
+# ---------------------------------------------------------------------------
 # Read-only endpoints
 # ---------------------------------------------------------------------------
 

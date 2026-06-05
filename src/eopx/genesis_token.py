@@ -45,7 +45,52 @@ GENESIS_WINDOW = TOTAL_VAULTS // 3  # first third → 333_333
 GENESIS_DOMAIN = b"esoptron.genesis.v1"
 GENESIS_POSITIONS_INFO = b"esoptron.genesis.positions.v1"
 GENESIS_SEAL_INFO = b"esoptron.genesis.seal.v1"
-BTC_BLOCK_TARGET = 900_000  # publicly committed; can be changed pre-launch
+BTC_BLOCK_TARGET = 900_000  # legacy pre-launch target / default derivation height
+
+# The committed Genesis Bitcoin block — the FINAL, frozen source of randomness
+# for every deterministic distribution (88 archetype positions, 12 Codex relic
+# positions, 555 Golden Egg positions + founder draws). Documented and hash-
+# tracked in docs/GENESIS_COMMITMENT.md / SPECS.SHA3-256. This is now the
+# **default everywhere** via :func:`resolve_btc_block`; the
+# ESOPTRON_BTC_BLOCK_HASH / ESOPTRON_BTC_BLOCK_HEIGHT env vars remain an
+# override for testing only. (Verified: this block + height reproduce the
+# committed catalog_commitment 3593d4d5…; changing it is a security regression.)
+COMMITTED_BTC_BLOCK_HASH_HEX = (
+    "00000000000000000000c253697e024b6bbe3c7702981277146fdd6767d43ee6"
+)
+COMMITTED_BTC_BLOCK_HEIGHT = 951_848
+COMMITTED_BTC_BLOCK_HASH = bytes.fromhex(COMMITTED_BTC_BLOCK_HASH_HEX)
+
+
+def resolve_btc_block(
+    env: Optional[Dict[str, str]] = None,
+) -> Tuple[bytes, int, bool]:
+    """Resolve the Genesis block to use: env override → committed default.
+
+    Returns ``(block_hash, block_height, committed)``. With no valid env
+    override the **committed** block is used and ``committed`` is ``True`` —
+    so callers default to the real, frozen distribution with no configuration
+    (no more "demo block"). ``ESOPTRON_BTC_BLOCK_HASH`` (+ optional
+    ``ESOPTRON_BTC_BLOCK_HEIGHT``) override it for testing; ``committed`` is
+    then ``True`` only when the override *equals* the committed block.
+    """
+    import os
+
+    source = os.environ if env is None else env
+    hash_hex = (source.get("ESOPTRON_BTC_BLOCK_HASH") or "").strip()
+    height_str = (source.get("ESOPTRON_BTC_BLOCK_HEIGHT") or "").strip()
+    if hash_hex:
+        try:
+            block = bytes.fromhex(hash_hex)
+        except ValueError:
+            block = b""
+        if len(block) == 32:
+            height = (int(height_str) if height_str.isdigit()
+                      else COMMITTED_BTC_BLOCK_HEIGHT)
+            committed = (block == COMMITTED_BTC_BLOCK_HASH
+                         and height == COMMITTED_BTC_BLOCK_HEIGHT)
+            return block, height, committed
+    return COMMITTED_BTC_BLOCK_HASH, COMMITTED_BTC_BLOCK_HEIGHT, True
 
 
 # ---------------------------------------------------------------------------
@@ -597,6 +642,8 @@ def archetypes_commitment_hex() -> str:
 __all__ = [
     "SCHEMA_VERSION",
     "TOTAL_GENESIS", "TOTAL_VAULTS", "GENESIS_WINDOW", "BTC_BLOCK_TARGET",
+    "COMMITTED_BTC_BLOCK_HASH_HEX", "COMMITTED_BTC_BLOCK_HEIGHT",
+    "COMMITTED_BTC_BLOCK_HASH", "resolve_btc_block",
     "Archetype", "GenesisSeal", "Inscription",
     "GENESIS_SEAL_SIGNED_FIELDS", "GENESIS_SEAL_UNSIGNED_FIELDS",
     "INSCRIPTION_DOMAIN",

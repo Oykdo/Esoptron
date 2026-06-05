@@ -23,10 +23,49 @@ pwa/.next/
 .DS_Store
 Thumbs.db
 
+# Generated / secret-bearing runtime artifacts (never commit)
+issuer*.json
+*.key.json
+*.controller.sealed.json
+anchor.env
+master_secrets.json
+
 # Local-only artifacts (not for public repo)
 README_old.md
 eopx_format_spec.docx
 eopx_verify_spec.docx
 DOCUMENT DE SYNTHÈSE*.txt
 DOCUMENT DE SYNTH*RECHERCHE*.txt
+
+# --- Hardened for the public repo ------------------------------------------
+# Issuer / vault / controller key material (ALL extensions — incl. a truncated
+# `.jso`, `.vault.json`, sealed controllers, local claim pointers).
+issuer*
+*.vault.json
+relic_claims.json
+
+# Build artifacts / scratch / logs
+*.tgz
+*.log
+_vt*.txt
+pwa/dist.tgz
+
+# Internal working docs — not for the public repo.
+CLAUDE.md
+POSITIONING.md
+docs/HANDOVER_*.md
+docs/audit_ecosystem_*.md
+docs/guides/
+
+# Operational / infra kit (maintainer-only; touches the live anchor, DB, or
+# server). Public testers don't need these; they expose deployment topology.
+deploy/
+scripts/anchor_*.py
+scripts/check_pg.py
+scripts/claim_relic.py
+scripts/seed_claimable_relic.py
+scripts/serve_artifact_api.py
+scripts/forge_collection.py
+scripts/forge_hunt_sheets.py
+scripts/relic_status.py
 

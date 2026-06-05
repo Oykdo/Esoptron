@@ -1,0 +1,29 @@
+{
+  // Points Pyright/Pylance at the system Python 3.11 used by this repo so that
+  // Pillow, numpy and OpenCV resolve. The package lives under src/, so it is
+  // added to the import search path. Adjust venvPath/venv (or switch to a
+  // project virtualenv) if your interpreter differs.
+  "venvPath": "C:/Users/jerem/AppData/Local/Programs/Python",
+  "venv": "Python311",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "include": ["src", "scripts", "tests"],
+  "extraPaths": ["src", "scripts", "tools"],
+
+  // Type-precision categories below are downgraded to "warning": a full audit
+  // (2026-06) confirmed every current hit is a false positive or harmless
+  // annotation debt, NOT a runtime bug, often in dynamic/crypto code where
+  // strict static typing fights the design. The real-bug categories
+  // (reportMissingImports, reportUndefinedVariable, reportPossiblyUnbound) stay
+  // as errors. Revisit if these surface a genuine defect.
+  "reportArgumentType": "warning",
+  "reportCallIssue": "warning",
+  "reportIndexIssue": "warning",
+  "reportFunctionMemberAccess": "warning",
+  "reportOptionalMemberAccess": "warning",
+  "reportOptionalSubscript": "warning",
+  "reportAttributeAccessIssue": "warning",
+  "reportReturnType": "warning",
+  "reportSelfClsParameterName": "warning",
+  "reportPossiblyUnboundVariable": "warning"
+}

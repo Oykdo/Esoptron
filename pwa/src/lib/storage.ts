@@ -227,3 +227,47 @@ export async function clearStoredEnrollment(): Promise<void> {
   await idbDelete(STORE, "default");
   await idbDelete(META_STORE, "vault");
 }
+
+// ---------------------------------------------------------------------------
+// Relic claims (EPX-C) — PUBLIC data, not encrypted
+// ---------------------------------------------------------------------------
+//
+// When a vault claims a relic it keeps a public record of the controller it
+// holds for that artifact. Possession is then a string comparison against the
+// anchor's current controller (see RelicsGallery): no secret is involved, so
+// these live in localStorage rather than the encrypted enrollment store. The
+// controller *secret* stays sealed to the vault and is never persisted here.
+
+const RELIC_CLAIMS_KEY = "esoptron.relic-claims.v1";
+
+export interface RelicClaim {
+  /** Codex relic key (e.g. "scintilla"). */
+  key: string;
+  /** EPX-T artifact id (hex). */
+  artifact_id_hex: string;
+  /** Public controller the vault holds for this artifact (hex). */
+  controller_pub_hex: string;
+  /** ISO-8601 timestamp set at claim time. */
+  claimed_at: string;
+}
+
+export function loadRelicClaims(): RelicClaim[] {
+  try {
+    const raw = localStorage.getItem(RELIC_CLAIMS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as RelicClaim[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function storeRelicClaim(claim: RelicClaim): void {
+  const claims = loadRelicClaims().filter((c) => c.key !== claim.key);
+  claims.push(claim);
+  localStorage.setItem(RELIC_CLAIMS_KEY, JSON.stringify(claims));
+}
+
+export function clearRelicClaims(): void {
+  localStorage.removeItem(RELIC_CLAIMS_KEY);
+}

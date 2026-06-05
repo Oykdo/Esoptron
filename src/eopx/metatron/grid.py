@@ -174,13 +174,13 @@ def classify_grid_color(r: int, g: int, b: int) -> Tuple[int, float]:
 
     # Precompute grid palette in Oklab
     if not hasattr(classify_grid_color, '_cache'):
-        classify_grid_color._cache = [
+        classify_grid_color._cache = [  # pyright: ignore
             srgb255_to_oklab(*grid_srgb(i)) for i in range(6)
         ]
 
     best = 0
     best_d2 = float('inf')
-    for idx, pal in enumerate(classify_grid_color._cache):
+    for idx, pal in enumerate(classify_grid_color._cache):  # pyright: ignore
         d2 = sum((t - p) ** 2 for t, p in zip(target, pal))
         if d2 < best_d2:
             best_d2 = d2

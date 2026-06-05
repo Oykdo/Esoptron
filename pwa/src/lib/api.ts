@@ -63,6 +63,68 @@ export interface ExtractResultDTO {
   errors: string[];
 }
 
+export interface CodexRelicDTO {
+  rank: number;
+  key: string;
+  name: string;
+  title: string;
+  element: "Fire" | "Water" | "Air" | "Earth";
+  seal_hue: number;
+  myth_echo: string;
+  mechanism: string;
+  lore: string;
+  lore_fr: string;
+  is_founder: boolean;
+  /** Present from Codex v2: lets a scanned card map back to its relic. */
+  artifact_id_hex?: string;
+  card_fingerprint_hex?: string;
+}
+
+export interface CodexDistributionDTO {
+  rank: number;
+  key: string;
+  vault_sequence: number;
+  placement: "founder" | "derived";
+}
+
+export interface CodexManifestDTO {
+  codex_version: number;
+  catalog_commitment_hex: string;
+  count: number;
+  relics: CodexRelicDTO[];
+  btc_block_hash_hex?: string;
+  btc_block_height?: number;
+  distribution?: CodexDistributionDTO[];
+}
+
+/** A golden egg's public identity (EPX golden-egg legend). */
+export interface GoldenEggDTO {
+  egg_number: number;
+  position: number;
+  tier: string;
+  glyph: string;
+  name: string;
+  egg_id: string;
+  egg_hash: string;
+}
+
+export interface EggResponseDTO {
+  vault_fp_hex: string;
+  egg: GoldenEggDTO;
+  btc_block_height: number;
+  committed: boolean;
+}
+
+/** Authoritative ledger state of a titled artifact (EPX-T §3.2). */
+export interface ArtifactStateDTO {
+  artifact_id_hex: string;
+  seq: number;
+  controller_pub_hex: string;
+  content_commit_hex: string;
+  issuer_fp_hex: string;
+  updated_at: string;
+}
+
 export interface ScanRequest {
   image: Blob;
   intent: Intent;
@@ -75,7 +137,11 @@ export interface ScanRequest {
   revealSecrets?: boolean;
 }
 
-const DEFAULT_BASE = "/api/v1";
+// Base of the PWA API (scan / codex / egg). Same-origin by default; set
+// VITE_API_BASE at build time for a path-mounted deploy (e.g. "/pwa/api/v1").
+const DEFAULT_BASE: string =
+  (import.meta.env?.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ??
+  "/api/v1";
 
 export class EsoptronApiError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -84,8 +150,54 @@ export class EsoptronApiError extends Error {
   }
 }
 
+/**
+ * Base URL of the titled-artifact anchor (EPX-T). It may be a different
+ * origin from the PWA API (the anchor is its own service). Configure via
+ * ``VITE_ANCHOR_URL``; defaults to same-origin ``/api/v1``.
+ */
+const ANCHOR_BASE: string =
+  (import.meta.env?.VITE_ANCHOR_URL as string | undefined)?.replace(/\/$/, "") ??
+  DEFAULT_BASE;
+
 export class EsoptronApi {
-  constructor(private readonly baseUrl: string = DEFAULT_BASE) {}
+  constructor(
+    private readonly baseUrl: string = DEFAULT_BASE,
+    private readonly anchorBaseUrl: string = ANCHOR_BASE,
+  ) {}
+
+  /**
+   * Current ledger state of a titled artifact. Throws on 404 (not minted)
+   * or transport failure; callers treat that as "ownership unknown".
+   */
+  async getArtifact(artifactIdHex: string): Promise<ArtifactStateDTO> {
+    const r = await fetch(`${this.anchorBaseUrl}/artifact/${artifactIdHex}`);
+    if (!r.ok)
+      throw new EsoptronApiError(
+        r.status,
+        `artifact lookup failed (${r.status})`,
+      );
+    return (await r.json()) as ArtifactStateDTO;
+  }
+
+  /** Claim a huntable relic (EPX-V). ``proof`` is a ClaimProof dict. */
+  async claimRelic(
+    artifactIdHex: string,
+    proof: unknown,
+  ): Promise<{ seq: number; entry: ArtifactStateDTO }> {
+    const r = await fetch(
+      `${this.anchorBaseUrl}/artifact/${artifactIdHex}/claim`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(proof),
+      },
+    );
+    if (!r.ok) {
+      const body = await r.text();
+      throw new EsoptronApiError(r.status, `claim failed (${r.status}): ${body}`);
+    }
+    return (await r.json()) as { seq: number; entry: ArtifactStateDTO };
+  }
 
   async health(): Promise<{ status: string; version: string }> {
     return this.getJson("/health");
@@ -93,6 +205,16 @@ export class EsoptronApi {
 
   async info(): Promise<InfoDTO> {
     return this.getJson("/info");
+  }
+
+  /** Public Codex manifest: the curated relic catalog + (if committed) distribution. */
+  async codex(): Promise<CodexManifestDTO> {
+    return this.getJson("/codex");
+  }
+
+  /** The golden egg attributed to a vault (public record; no secrets). */
+  async getEgg(vaultIdHex: string): Promise<EggResponseDTO> {
+    return this.getJson(`/egg/${vaultIdHex}`);
   }
 
   /**

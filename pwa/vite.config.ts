@@ -3,8 +3,13 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
 const apiTarget = process.env.VITE_API_TARGET ?? "http://127.0.0.1:8765";
+// Path the PWA is mounted under in production (path-mounted at /pwa/ behind
+// nginx, alongside the anchor at /anchor/). Override with VITE_BASE for a
+// root/sub-domain deploy or for local dev at "/".
+const base = process.env.VITE_BASE ?? "/pwa/";
 
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
@@ -18,7 +23,8 @@ export default defineConfig({
         background_color: "#0a0a14",
         display: "standalone",
         orientation: "portrait",
-        start_url: "/",
+        start_url: base,
+        scope: base,
         icons: [
           {
             src: "icon-192.png",
@@ -36,7 +42,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
-        navigateFallback: "/index.html",
+        navigateFallback: `${base}index.html`,
       },
     }),
   ],

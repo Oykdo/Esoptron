@@ -306,9 +306,13 @@ def _do_unlock(symbols: List[int], ctx: ScanContext,
     # session key. Callers using a single-device flow can call it here;
     # multi-device flows would send ``response`` over the wire.
     from .vault import verify_response
-    session_key = verify_response(
-        response, ctx.spinor_hash_local, symbols,
-    )
+    try:
+        session_key = verify_response(
+            response, ctx.spinor_hash_local, symbols,
+        )
+    except Exception as exc:  # keep the "never raises" contract of scan_and_route
+        result.errors.append(f"SAS verify failed: {exc}")
+        return
     if session_key is None:
         result.errors.append("SAS challenge response did not verify")
         return

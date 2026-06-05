@@ -42,6 +42,13 @@ header h1 {
   font-size: 28px;
   letter-spacing: 0.02em;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+header {
+  position: relative;
 }
 
 header .subtitle {
@@ -50,11 +57,32 @@ header .subtitle {
   font-size: 14px;
 }
 
+.header-lang {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  width: auto;
+  margin: 0;
+  padding: 5px 12px;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  border: 1px solid #2a2a44;
+  border-radius: 999px;
+  text-decoration: none;
+}
+
+.header-lang:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
 section {
   margin-top: 16px;
   padding: 20px;
   background: var(--bg-elev);
   border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  animation: rise 0.42s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 section h2 {
@@ -79,11 +107,30 @@ button {
   background: var(--bg);
   color: var(--fg);
   font-family: inherit;
+  transition: transform 0.14s ease, filter 0.2s ease, box-shadow 0.2s ease,
+    background 0.2s ease, opacity 0.2s ease;
+}
+
+button:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+button:active {
+  transform: translateY(1px) scale(0.99);
 }
 
 button.primary {
-  background: var(--accent);
+  background: linear-gradient(
+    135deg,
+    var(--accent) 0%,
+    color-mix(in srgb, var(--accent) 60%, var(--accent-2)) 100%
+  );
   color: white;
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+button.primary:hover {
+  filter: brightness(1.08);
 }
 
 button.primary:disabled {
@@ -355,4 +402,540 @@ code {
   background: var(--bg);
   padding: 1px 6px;
   border-radius: 4px;
+}
+
+/* Codex / relics gallery */
+.relics-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.relics-head .lang-toggle {
+  width: auto;
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.relics-intro {
+  color: var(--fg-dim);
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.relic-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.relic-card {
+  --seal: var(--accent);
+  background: var(--bg);
+  border-radius: var(--radius);
+  padding: 16px;
+  border-left: 3px solid var(--seal);
+  animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.relic-card:hover {
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.25);
+}
+
+@keyframes starpulse {
+  0%,
+  100% {
+    opacity: 0.8;
+    text-shadow: 0 0 9px var(--seal);
+  }
+  50% {
+    opacity: 1;
+    text-shadow: 0 0 16px var(--seal), 0 0 28px var(--seal);
+  }
+}
+
+@keyframes iconpulse {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 6px color-mix(in srgb, var(--seal) 50%, transparent));
+  }
+  50% {
+    transform: scale(1.12);
+    filter: drop-shadow(0 0 13px var(--seal));
+  }
+}
+
+.relic-card.held .relic-icon {
+  animation: iconpulse 3.2s ease-in-out infinite;
+}
+
+.relic-card.founder {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--seal) 10%, var(--bg)) 0%,
+    var(--bg) 60%
+  );
+}
+
+.relic-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.relic-star {
+  color: var(--seal);
+  font-size: 22px;
+  line-height: 1;
+  text-shadow: 0 0 12px var(--seal);
+}
+
+.relic-icon {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  color: var(--seal);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--seal) 55%, transparent));
+}
+
+.relic-title {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.relic-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.relic-sub {
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+.relic-rank {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.relic-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.relic-tags .tag {
+  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  border: 1px solid #2a2a44;
+}
+
+.relic-tags .tag.element {
+  color: var(--seal);
+  border-color: var(--seal);
+}
+
+.relic-tags .tag.founder-tag {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.relic-tags .tag.vault {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+
+.relic-lore {
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 8px 0 12px;
+}
+
+.relic-meta {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.relic-meta dt {
+  color: var(--fg-dim);
+  text-transform: lowercase;
+}
+
+.relic-meta dd {
+  margin: 0;
+  color: var(--fg);
+}
+
+.relics-commit {
+  color: var(--fg-dim);
+  font-size: 12px;
+  text-align: center;
+  margin: 16px 0 4px;
+}
+
+.relics-owned {
+  font-size: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  margin: 12px 0 4px;
+}
+
+.relics-owned.has {
+  background: rgba(39, 174, 96, 0.12);
+  border-left: 3px solid var(--ok);
+}
+
+.relics-owned.empty {
+  background: var(--bg);
+  border-left: 3px solid var(--fg-dim);
+  color: var(--fg-dim);
+}
+
+.relic-card.held {
+  border-left-color: var(--ok);
+  box-shadow: 0 0 0 1px rgba(39, 174, 96, 0.35) inset;
+}
+
+.relic-held {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ok);
+  border: 1px solid var(--ok);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+.relic-tags .tag.moved {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.relic-3d-toggle {
+  margin-top: 10px;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+
+.relic-3d {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+  padding: 8px;
+  background: radial-gradient(
+    circle at 50% 40%,
+    color-mix(in srgb, var(--seal) 14%, var(--bg)) 0%,
+    var(--bg) 70%
+  );
+  border-radius: var(--radius);
+}
+
+.relic-canvas {
+  width: 300px;
+  height: 300px;
+  max-width: 100%;
+}
+
+.relic-canvas canvas {
+  display: block;
+  border-radius: 8px;
+}
+
+/* Claim flow */
+.claim-identified {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+
+.claim-identified .relic-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.claim-identified .relic-sub {
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+.claim-relic .small {
+  color: var(--fg-dim);
+  font-size: 14px;
+}
+
+.claim-done {
+  background: rgba(39, 174, 96, 0.12);
+  border-left: 3px solid var(--ok);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+/* Golden egg */
+.egg-gate .filepicker {
+  display: block;
+  margin: 10px 0;
+  padding: 14px;
+  border: 2px dashed #2a2a44;
+  border-radius: var(--radius);
+  text-align: center;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--fg-dim);
+}
+
+.egg-gate .filepicker:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.egg-gate .filepicker input {
+  display: none;
+}
+
+.egg-vaultid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--fg-dim);
+  margin: 8px 0;
+}
+
+.egg-vaultid input {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.egg-note {
+  font-size: 12px;
+  color: var(--fg-dim);
+  border-left: 2px solid var(--accent-2);
+  padding-left: 10px;
+  margin-top: 12px;
+}
+
+.egg-stage {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin: 12px 0;
+  padding: 10px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 38%, #1a1626 0%, var(--bg) 70%);
+  border-radius: var(--radius);
+}
+
+@keyframes glowpulse {
+  0%,
+  100% {
+    opacity: 0.32;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.04);
+  }
+}
+
+.egg-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 40%,
+    color-mix(in srgb, var(--accent) 26%, transparent) 0%,
+    transparent 55%
+  );
+  animation: glowpulse 4.6s ease-in-out infinite;
+}
+
+.egg-canvas {
+  position: relative;
+  z-index: 1;
+  width: 340px;
+  height: 340px;
+  max-width: 100%;
+}
+
+.egg-canvas canvas {
+  display: block;
+}
+
+.egg-meta {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 6px 12px;
+  font-size: 14px;
+  margin: 8px 0;
+}
+
+.egg-meta dt {
+  color: var(--fg-dim);
+}
+
+.egg-meta dd {
+  margin: 0;
+}
+
+.egg-open h2 {
+  text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   Subtle life — minimal motion. A breathing brand mark, a soft ambient glow,
+   and a gentle rise on each section. All disabled under prefers-reduced-motion.
+   -------------------------------------------------------------------------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.92);
+    box-shadow: 0 0 8px var(--accent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+    box-shadow: 0 0 18px var(--accent), 0 0 30px color-mix(in srgb, var(--accent-2) 60%, transparent);
+  }
+}
+
+@keyframes drift {
+  from {
+    transform: translate(-8%, -6%) rotate(0deg);
+  }
+  to {
+    transform: translate(8%, 6%) rotate(160deg);
+  }
+}
+
+/* Ambient glow behind everything — barely there, slowly drifting. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -25%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+      38% 38% at 28% 18%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      40% 40% at 76% 82%,
+      color-mix(in srgb, var(--accent-2) 10%, transparent),
+      transparent 70%
+    );
+  animation: drift 30s ease-in-out infinite alternate;
+}
+
+/* The living mark beside the title. */
+.brand-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: none;
+  background: radial-gradient(circle at 38% 36%, var(--accent-2), var(--accent) 70%);
+  animation: breathe 3.8s ease-in-out infinite;
+}
+
+/* Lighter typographic scale for the welcome / section copy. */
+.lead {
+  font-size: 18px;
+  margin: 0 0 6px;
+}
+
+.muted {
+  color: var(--fg-dim);
+  font-size: 14px;
+  margin-top: 0;
+}
+
+.welcome .primary {
+  margin-top: 20px;
+}
+
+/* "How it works" — a quiet, collapsible ecosystem primer on the welcome. */
+.how {
+  margin: 16px 0 4px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid #2a2a44;
+  border-radius: var(--radius);
+}
+
+.how summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--accent-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.how summary::-webkit-details-marker {
+  display: none;
+}
+
+.how summary::before {
+  content: "ⓘ ";
+}
+
+.how[open] summary {
+  margin-bottom: 10px;
+}
+
+.how ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.how-note {
+  margin: 12px 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  body::before {
+    animation: none !important;
+    transition: none !important;
+  }
 }

@@ -12,6 +12,8 @@ from .public import encode_public
 from .mnemonic import encode_private, decode_private
 from .reed_solomon import is_in_code
 from .render import render
+from .seal_reveal import render_seal_revealed
+from .egg_emblem import render_egg_emblem
 from .detect import (
     extract_canonical, extract_from_photo, rectify,
     erasures_from_confidences, extract_robust,
@@ -23,6 +25,8 @@ __all__ = [
     "decode_private",
     "is_in_code",
     "render",
+    "render_seal_revealed",
+    "render_egg_emblem",
     "extract_canonical",
     "extract_from_photo",
     "rectify",

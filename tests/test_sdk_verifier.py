@@ -21,7 +21,7 @@ if str(_SDK_DIR) not in sys.path:
 
 # IMPORTANT: import the SDK before importing eopx.format to ensure
 # the SDK has no transitive dependency on the main package.
-import esoptron as sdk  # noqa: E402
+import esoptron as sdk  # noqa: E402  # pyright: ignore[reportMissingImports]  # runtime sys.path insert above
 
 # Packer comes from the main repo (NOT exposed by the SDK).
 from eopx.format import EopxKey, pack  # noqa: E402

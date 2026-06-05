@@ -169,7 +169,7 @@ def _render_inner_aruco(img: Image.Image, size: int) -> None:
     """
     if not _HAS_CV2:
         return  # no cv2 → skip ArUco (detection will also fail)
-    aruco = cv2.aruco
+    aruco = cv2.aruco  # pyright: ignore  # guarded by _HAS_CV2 above
     dictionary = aruco.getPredefinedDictionary(getattr(aruco, ARUCO_DICT_NAME))
     marker_side = max(8, int(round(size * INNER_ARUCO_FRAC)))
 

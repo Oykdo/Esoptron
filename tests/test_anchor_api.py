@@ -332,6 +332,51 @@ class TestGenesisHit:
 
 
 # ---------------------------------------------------------------------------
+# Golden Eggs — auto-win on landing (EPX-E)
+# ---------------------------------------------------------------------------
+
+class TestGoldenEggHit:
+    def test_landing_on_egg_position_wins_a_sealed_egg(
+            self, state, context, client):
+        from eopx.egg_token import EggSeal, verify_egg_seal
+        egg = context.eggs[0]
+        r = client.post("/api/v1/genesis/anchor", json={
+            "vault_fp_hex": "f" + "0" * 63,
+            "vault_number_hint": egg.position,
+        })
+        body = r.get_json()
+        assert body["golden_egg"] is True
+        assert body["egg"]["egg_id"] == egg.egg_id
+        seal = EggSeal.from_dict(body["egg_seal"])
+        assert verify_egg_seal(
+            seal, deployment_pk=context.deployment_key.dilithium_pk,
+            eggs=context.eggs)
+
+    def test_non_egg_sequence_has_no_egg(self, context, client):
+        # Pick a sequence guaranteed not to be an egg position.
+        seq = 1
+        assert seq not in context.eggs_by_position
+        r = client.post("/api/v1/genesis/anchor",
+                        json={"vault_fp_hex": "ab" * 32,
+                              "vault_number_hint": seq})
+        body = r.get_json()
+        assert body["golden_egg"] is False
+        assert "egg_seal" not in body
+
+    def test_egg_by_sequence_endpoint(self, state, context, client):
+        egg = context.eggs[1]
+        client.post("/api/v1/genesis/anchor", json={
+            "vault_fp_hex": "cc" * 32, "vault_number_hint": egg.position})
+        r = client.get(f"/api/v1/genesis/egg/{egg.position}")
+        assert r.status_code == 200
+        assert r.get_json()["egg"]["egg_id"] == egg.egg_id
+
+    def test_egg_by_sequence_404_when_not_egg(self, client):
+        r = client.get("/api/v1/genesis/egg/1")
+        assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap helper
 # ---------------------------------------------------------------------------
 

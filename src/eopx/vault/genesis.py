@@ -33,6 +33,10 @@ import hashlib
 import hmac
 import json
 import secrets
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..format.keys import EopxKey
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
@@ -389,4 +393,4 @@ def recovery_phrase_to_entropy(words: List[str],
     phrase = " ".join(w.strip().lower() for w in words)
     if not mnemo.check(phrase):
         raise ValueError("invalid BIP-39 mnemonic (bad checksum or word)")
-    return mnemo.to_entropy(phrase)
+    return bytes(mnemo.to_entropy(phrase))
