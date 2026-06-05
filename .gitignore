@@ -56,6 +56,7 @@ POSITIONING.md
 docs/HANDOVER_*.md
 docs/audit_ecosystem_*.md
 docs/guides/
+*[Hh]andover*
 
 # Operational / infra kit (maintainer-only; touches the live anchor, DB, or
 # server). Public testers don't need these; they expose deployment topology.

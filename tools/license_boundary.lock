@@ -1,0 +1,29 @@
+# Esoptron license-boundary lock — generated; do not hand-edit.
+# Re-pin only after review: py tools/license_boundary.py --write
+# Denied roots (must never import): eidolon, eidolon_crypto, src
+
+fingerprint: sha3-256:7a34a1d17721fd69c06b711e9d13b354630016542cb19ab095e4599e2be81ffc
+imports:
+  - PIL
+  - argon2
+  - cryptography
+  - cv2
+  - flask
+  - flask_cors
+  - mnemonic
+  - numpy
+  - pqcrypto
+  - print_sheet
+  - psycopg
+  - qrcode
+sigil:
+             o+O*oo*=
+          . o B*++o++
+         . + * =O o..
+          o B +o.=   
+         . S +...    
+          + o .      
+         . o o       
+          . . o      
+             . E     
+self: sha3-256:73bbe6699c6f8b07e21bb41bd9518033400cfa25e35249be5a529f7b401e497f
