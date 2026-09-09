@@ -293,11 +293,34 @@ homography error", and **geometry is the binding axis** of the decode envelope
 quality 10 and chroma noise σ 96. Fiducials that travel with the cube give the
 most precise warp available, on precisely the axis that limits the system.
 
-The catch is the reason it was never rendered. `ARUCO_INNER_IDS` maps vertices
-7-12 to marker IDs 20-25, and those six vertices are **six of the thirteen
-vertex carriers**. Rendering the markers puts ink on six of the 91 carriers —
-violating the rule this same session turned into an assertion (*never on the
-cube*), and paying on the very envelope the change is meant to widen.
+*Corrected a second time.* The paragraph that stood here claimed that
+rendering the markers "puts ink on six of the 91 carriers". **That is also
+wrong.** `_render_inner_aruco` states, and does, the opposite: each marker is
+"pushed radially outward … so it sits **outside** the colored ring of the
+vertex disk, **in the white margin area**". No carrier is sacrificed.
+
+Two wrong readings of one module, in opposite directions, both from inferring
+behaviour from a name — "duplicate" from the file's similarity to `aruco.py`,
+"ink on carriers" from the identifier `ARUCO_INNER_IDS`. The module was read
+properly only on the third pass. Recorded here rather than quietly amended,
+because an audit that hides its own error rate is worth less than one that
+shows it.
+
+**The real reason it was never rendered is a one-line bug.**
+`INNER_ARUCO_OFFSET = 1.50` places each marker at 1.5 × the drawable radius,
+and on a 1024 px canvas the drawable radius is 410 px — so all six land at
+1.5 × 410 = 615 px from centre, past the 512 px edge. Computed for every
+marker: **6 of 6 fall outside the canvas.** The function runs and paints
+nothing visible. There is roughly 100 px of white margin between the hexagon
+and the edge, and the marker is 39 px, so an offset near 1.10 would place them
+inside it. 1.50 appears never to have been tried.
+
+Worth recording for whoever takes the trade: **even if the six carriers did
+have to be sacrificed, the cost would be near zero.** Their positions map to
+blocks 0-5 of 7 under the interleave — one erasure in six distinct blocks,
+none doubled. At `2t + e ≤ 3` per block, one spent erasure still leaves
+`t = 1`. The interleave spreads them perfectly. But the markers sit in the
+margin, so the question does not arise.
 
 So "wire it up or delete it" is the wrong question. The right one is **does
 moving the fiducials inward buy more than the ink costs**, and it is not
@@ -344,9 +367,13 @@ image patch as the carriers, so their *relative* error is far smaller than
 markers read across a whole A4 sheet under perspective. The measurement now
 leans toward its premise.
 
-It does not settle the trade. What is still unmeasured is the other side —
-what six ArUco markers *cost* when they replace six of the 91 carriers. That
-is the next measurement, and it is now a well-posed one.
+It does not settle the trade, but the remaining work is now small and
+sequenced: fix the offset so the markers land in the margin, detect them with
+OpenCV on the degraded image instead of handing positions over, and re-measure
+the perspective envelope against the current path — which locates these same
+six vertices by the centroid of the most colourful cluster
+(`detect._refine_vertex_position`), a method unlikely to hold the ~1 px of
+relative accuracy measured above.
 
 ### N-11 — Eidolon: coverage was configured, shadowed, and never measured
 
