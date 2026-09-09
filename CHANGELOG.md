@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+* **`pqcrypto` capped below 1.0.** Upstream 1.0.0 renamed
+  `pqcrypto.sign.ml_dsa_87.generate_keypair()` to `keygen()`, so a fresh
+  install resolved to a version where every key operation in
+  `eopx.format.keys` raises `AttributeError` (first hit while provisioning the
+  production anchor). Both `pyproject.toml` and `sdk/python/pyproject.toml`
+  now require `pqcrypto>=0.3.4,<1.0`. Lifting the cap means porting `keys.py`
+  to the 1.0 API first.
+
 ### Added
 
 * **Figurative relic figure.** `eopx.collection.figure` draws each Codex relic
