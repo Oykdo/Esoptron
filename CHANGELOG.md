@@ -125,6 +125,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **The `.eopx` wire format no longer takes its parameters from the
+  dependency (`eopx.format.keys`).** The six ML-DSA-87 / ML-KEM-1024 sizes were
+  read off `pqcrypto` at import time, and `eopx_format` validates a file
+  against them — `pack` rejects a public key that is not
+  `SIG_PUBLIC_KEY_SIZE` bytes, `verify` rejects a signature that is not
+  `SIG_SIGNATURE_SIZE`. So the admissibility rules of a **frozen** format moved
+  with whatever the installed library defined: a backend rebound to another
+  parameter set would have been followed rather than refused. The sizes are now
+  pinned to FIPS 204 / FIPS 203 literals and the backend is checked against
+  them, once, on first use.
+
+  The same change completes the audit's P2-2 recommendation (2026-05-28): the
+  import is deferred, so the pure-Python half of the package — Shamir,
+  `secure_bytes`, the Metatron field — is importable without the post-quantum
+  stack. The missing-dependency error keeps its exact wording; it simply
+  arrives at the first key operation. The check also names the
+  `pqcrypto>=1.0` API break (`generate_keypair()` → `keygen()`) instead of
+  letting it surface as an `AttributeError` from inside a key operation.
+
 * **The license-boundary guard no longer imports the tree it audits.**
   `tools/license_boundary.py` is a static AST scan that executes no code from
   `eopx` — except that its lock header drew a randomart sigil via

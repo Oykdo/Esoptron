@@ -33,26 +33,97 @@ from typing import Optional
 
 _UTC = _dt.timezone.utc
 
-try:
-    from pqcrypto.sign import ml_dsa_87 as _dsa
-    from pqcrypto.kem import ml_kem_1024 as _kem
-except ImportError as exc:  # pragma: no cover
-    raise RuntimeError(
-        "pqcrypto is required for Esoptron format; "
-        "install with `pip install pqcrypto`"
-    ) from exc
-
-
 SIG_ALGORITHM = "ML-DSA-87"  # NIST FIPS 204 (Dilithium5)
 KEM_ALGORITHM = "ML-KEM-1024"  # NIST FIPS 203 (Kyber1024)
 
-SIG_PUBLIC_KEY_SIZE = _dsa.PUBLIC_KEY_SIZE  # 2592
-SIG_SECRET_KEY_SIZE = _dsa.SECRET_KEY_SIZE  # 4896
-SIG_SIGNATURE_SIZE = _dsa.SIGNATURE_SIZE    # 4627
+# Pinned by this project, not read off the library.
+#
+# These sizes belong to standardised parameter sets -- FIPS 204 ML-DSA-87 and
+# FIPS 203 ML-KEM-1024 -- so they are fixed for the life of the algorithms.
+# They are also the wire format's own validation: `eopx_format.pack` rejects a
+# public key that is not SIG_PUBLIC_KEY_SIZE bytes, and `verify` rejects a
+# signature that is not SIG_SIGNATURE_SIZE. Reading them from `pqcrypto` at
+# import time meant the `.eopx` format's admissibility rules moved with
+# whatever the installed dependency happened to define. A backend that quietly
+# rebound `ml_dsa_87` to another parameter set would not have been rejected --
+# the format would have followed it.
+#
+# :func:`_check_backend` verifies the library agrees, once, on first use.
+SIG_PUBLIC_KEY_SIZE = 2592
+SIG_SECRET_KEY_SIZE = 4896
+SIG_SIGNATURE_SIZE = 4627
 
-KEM_PUBLIC_KEY_SIZE = _kem.PUBLIC_KEY_SIZE  # 1568
-KEM_SECRET_KEY_SIZE = _kem.SECRET_KEY_SIZE  # 3168
-KEM_CIPHERTEXT_SIZE = _kem.CIPHERTEXT_SIZE  # 1568
+KEM_PUBLIC_KEY_SIZE = 1568
+KEM_SECRET_KEY_SIZE = 3168
+KEM_CIPHERTEXT_SIZE = 1568
+
+_BACKEND: Optional[tuple] = None
+
+
+def _backend() -> tuple:
+    """``(ml_dsa_87, ml_kem_1024)``, imported and checked on first use.
+
+    Deferred so that the pure-Python half of the package -- Shamir,
+    secure_bytes, the Metatron field -- stays importable without the
+    post-quantum stack (audit 2026-05-28, P2-2). The import error keeps the
+    same wording it had at module level; it simply arrives when a key
+    operation is attempted rather than when anything at all is imported.
+    """
+    global _BACKEND
+    if _BACKEND is None:
+        try:
+            from pqcrypto.sign import ml_dsa_87 as dsa
+            from pqcrypto.kem import ml_kem_1024 as kem
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError(
+                "pqcrypto is required for Esoptron format; "
+                "install with `pip install pqcrypto`"
+            ) from exc
+        _check_backend(dsa, kem)
+        _BACKEND = (dsa, kem)
+    return _BACKEND
+
+
+def _check_backend(dsa, kem) -> None:
+    """Fail loudly if the library disagrees with the pinned parameters.
+
+    Two ways this fires, both of which used to pass silently or obscurely:
+    a backend bound to a different parameter set (the wire format would have
+    shifted under a signature), and pqcrypto >= 1.0, which renamed
+    ``generate_keypair()`` to ``keygen()`` and would otherwise surface as an
+    ``AttributeError`` from inside a key operation.
+    """
+    expected = [
+        ("ML-DSA-87 public key", dsa.PUBLIC_KEY_SIZE, SIG_PUBLIC_KEY_SIZE),
+        ("ML-DSA-87 secret key", dsa.SECRET_KEY_SIZE, SIG_SECRET_KEY_SIZE),
+        ("ML-DSA-87 signature", dsa.SIGNATURE_SIZE, SIG_SIGNATURE_SIZE),
+        ("ML-KEM-1024 public key", kem.PUBLIC_KEY_SIZE, KEM_PUBLIC_KEY_SIZE),
+        ("ML-KEM-1024 secret key", kem.SECRET_KEY_SIZE, KEM_SECRET_KEY_SIZE),
+        ("ML-KEM-1024 ciphertext", kem.CIPHERTEXT_SIZE, KEM_CIPHERTEXT_SIZE),
+    ]
+    for label, got, want in expected:
+        if got != want:
+            raise RuntimeError(
+                f"pqcrypto backend disagrees with the pinned {label} size: "
+                f"got {got}, expected {want}. The .eopx wire format is frozen "
+                "on FIPS 204 / FIPS 203 parameters; refusing to sign or verify "
+                "against a different parameter set."
+            )
+    for module, name in ((dsa, "sign"), (kem, "kem")):
+        if not hasattr(module, "generate_keypair"):
+            raise RuntimeError(
+                f"pqcrypto {name} backend has no generate_keypair(); this is "
+                "the pqcrypto >= 1.0 API (renamed to keygen()). Esoptron pins "
+                "pqcrypto<1.0 -- see pyproject.toml."
+            )
+
+
+def _dsa():
+    return _backend()[0]
+
+
+def _kem():
+    return _backend()[1]
 
 
 def _utc_now() -> str:
@@ -93,8 +164,8 @@ class EopxKey:
     @classmethod
     def generate(cls) -> "EopxKey":
         """Generate a fresh Dilithium5 + Kyber1024 keypair."""
-        dilithium_pk, dilithium_sk = _dsa.generate_keypair()
-        kyber_pk, kyber_sk = _kem.generate_keypair()
+        dilithium_pk, dilithium_sk = _dsa().generate_keypair()
+        kyber_pk, kyber_sk = _kem().generate_keypair()
         return cls(
             dilithium_pk=dilithium_pk, dilithium_sk=dilithium_sk,
             kyber_pk=kyber_pk, kyber_sk=kyber_sk,
@@ -135,12 +206,12 @@ class EopxKey:
         """Sign a byte string with Dilithium5. Requires the secret key."""
         if self.dilithium_sk is None:
             raise RuntimeError("cannot sign: dilithium_sk not loaded")
-        return _dsa.sign(self.dilithium_sk, message)
+        return _dsa().sign(self.dilithium_sk, message)
 
     def verify(self, message: bytes, signature: bytes) -> bool:
         """Verify a Dilithium5 signature. Always available."""
         try:
-            return _dsa.verify(self.dilithium_pk, message, signature)
+            return _dsa().verify(self.dilithium_pk, message, signature)
         except Exception:
             return False
 
@@ -154,14 +225,14 @@ class EopxKey:
         Uses ``self.kyber_pk`` as the recipient's public key. Can be
         called on a public-only :class:`EopxKey`.
         """
-        ct, ss = _kem.encrypt(self.kyber_pk)
+        ct, ss = _kem().encrypt(self.kyber_pk)
         return ct, ss
 
     def kem_decapsulate(self, ciphertext: bytes) -> bytes:
         """Kyber1024 KEM decapsulation. Requires the secret key."""
         if self.kyber_sk is None:
             raise RuntimeError("cannot decapsulate: kyber_sk not loaded")
-        return _kem.decrypt(self.kyber_sk, ciphertext)
+        return _kem().decrypt(self.kyber_sk, ciphertext)
 
     # ------------------------------------------------------------------
     # Serialization
