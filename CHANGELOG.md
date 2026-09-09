@@ -125,6 +125,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`vault_fp` has one definition again (`eopx.vault.identity`).** Three
+  derivations had grown up in the tree and disagreed for the same vault:
+  `card_fingerprint(card)` (`vault/enroll`, `vault/genesis`, `collection`),
+  `sha3_256("esoptron.vault_fp.v1|" + seed)` (`scripts/make_invitation.py`) and
+  `sha3_256("epx-h.badge.vault_fp.v1" + spinor)` (`scripts/eopx_badge.py`) —
+  `74ad6428…`, `29f96634…` and `bb212913…` for one and the same vault. Three
+  answers to "which vault is this" is the same as none, and everything keyed by
+  `vault_fp` silently depended on which call site the caller came through: the
+  anchor's `vault_anchors` index, the EPX-H seal geometry, and
+  `egg_token.founder_egg`, which *draws a golden egg* from it.
+
+  The card fingerprint wins because it is the only one a **scan** can produce,
+  and EPX-G §143 already required it. The seed-derived variant was worse than
+  redundant: the seed is secret, so a verifier could never recompute it — an
+  identifier nobody but the holder can check is not an identifier.
+  `require_vault_fingerprint()` now rejects a truncated or hex-string
+  fingerprint at the boundaries that consume one, because 16 bytes reaching a
+  KDF yields a stable, plausible, wrong answer instead of an error.
+
+  EPX-2 §4.1's test vector carried the seed-derived value, so a port
+  reproducing the spec byte for byte would have disagreed with the
+  implementation; it is corrected to `74ad6428…` and the spec re-recorded.
+  `tests/test_vault_identity.py` pins the definition and greps for the
+  abandoned domain strings — a fourth derivation would arrive the way the last
+  two did, quietly, in a script.
+
 * **`eopx.egg_token` no longer needs the post-quantum stack to derive a
   clutch.** `EopxKey` was imported at module level but is used only to mint and
   verify an `EggSeal`, so recomputing a public distribution required

@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 from eopx.metatron import encode_public, render_seal_revealed
+from eopx.vault.identity import vault_fingerprint
 from eopx.metatron.seal_reveal import (
     select_star, seal_color_swap, star_pointing_degrees,
 )
@@ -40,12 +41,14 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from print_sheet import make_sheet  # type: ignore  # noqa: E402
 
-VAULT_FP_DOMAIN = b"epx-h.badge.vault_fp.v1"
-
-
 def _derive_vault_fp(spinor: bytes) -> bytes:
-    """Deterministic 32-byte vault fingerprint from a public spinor hash."""
-    return hashlib.sha3_256(VAULT_FP_DOMAIN + spinor).digest()
+    """The vault fingerprint for this spinor -- the card fingerprint, nothing else.
+
+    This used to be its own domain-separated hash of the spinor, which gave the
+    badge a fourth answer to "which vault is this" and, since ``vault_fp``
+    selects the revealed hexagram, a seal no other component agreed with.
+    """
+    return vault_fingerprint(spinor)
 
 
 def _resolve(args) -> tuple[bytes, bytes]:

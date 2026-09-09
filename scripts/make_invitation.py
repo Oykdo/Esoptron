@@ -36,6 +36,7 @@ from eopx.genesis_token import (
     mint_genesis_seal,
 )
 from eopx.metatron import encode_private, encode_public
+from eopx.vault.identity import vault_fingerprint
 from print_sheet import make_sheet, DPI  # type: ignore  # noqa: E402
 
 
@@ -83,7 +84,10 @@ def main() -> int:
     # always re-produces the same vault if the user wants to regenerate.
     seed = hashlib.sha3_256(b"esoptron.invitation.v1|" + code.encode("utf-8")).digest()
     spinor = hashlib.sha3_512(b"esoptron.invitation.v1|" + code.encode("utf-8") + b"|spinor").digest()
-    vault_fp = hashlib.sha3_256(b"esoptron.vault_fp.v1|" + seed).digest()
+    # The card fingerprint, not a hash of the seed: a vault identity has to be
+    # recomputable by whoever holds the card (eopx.vault.identity). Hashing the
+    # seed produced an identifier only the holder could ever check.
+    vault_fp = vault_fingerprint(spinor)
 
     # Pick a Genesis position deterministically from the code so the seal lands
     # on a real Genesis slot. We need a deployment key to sign the seal; for
