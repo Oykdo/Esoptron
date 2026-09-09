@@ -1,0 +1,275 @@
+# Esoptron Ecosystem Audit Report — re-audit
+
+**Date:** 2026-09-09
+**Scope:** Re-verification of every finding in `docs/audit_report_2026-05-28.md`
+against the current tree, plus findings raised since.
+**Supersedes:** nothing. The 2026-05-28 report is a dated record of what was
+true then and is left untouched; this document records what is true now.
+
+**Lineage.** Three audit documents precede this one and they are not
+interchangeable: `audit_report_2026-05-28.md` is the P0/P1/P2 security sweep
+re-verified here; `audit_report_2026-05-30.md` is a hygiene and
+release-engineering snapshot; `audit_ecosystem_triangulation_2026-05-31.md`
+covers the cross-repo seams. **Only the 05-28 sweep was re-verified.** The
+counts below are relative to it, not to the project as a whole. Spot-checked
+from the 05-30 report: its three high-priority items (`RELEASE.md`, a
+pre-commit configuration, encoding and manifest checks wired into CI) are all
+present, and its low-priority §4.3.1 (property-based fuzz tests) is done. Its
+medium-priority section and the 05-31 triangulation were not re-verified.
+
+---
+
+## Declared conflict of interest
+
+Several of the fixes assessed below were written on the same day as this
+re-audit, by the same author. **An assessment of one's own patch is not an
+independent audit.** Every such item is marked *(same-day)* and should be
+treated as a claim to be checked, not as a clearance. The items inherited from
+the previous report — the server hardening, the migration protocol, the key
+handling — were fixed by others before this session and were verified here by
+reading the current code.
+
+---
+
+## Executive Summary
+
+| Metric | 2026-05-28 | 2026-09-09 |
+| --- | --- | --- |
+| Findings open, 05-28 sweep only | 23 (P0: 6, P1: 9, P2: 8) | **6** |
+| Of the original 23 | — | 19 fixed, 3 partial, 1 mitigated |
+| New findings raised since | — | 9 (7 fixed, 2 open) |
+| Test files | — | 62 |
+| Suite (Windows, local) | could not collect | **901 collected, green**, 8 skipped |
+| CI (Linux/Win/macOS ×2 + TS + PWA) | — | green, 8/8 jobs |
+
+The previous report's central judgement — *"the cryptographic core is strong,
+the operational surface demands the most work"* — has been acted on. All six P0
+items are closed or reduced, and the Flask surface now has rate limiting,
+decompression-bomb caps, CORS wildcard rejection, replay-resistant HMAC
+signing, and a production gate on the anchor's dummy-block fallback.
+
+Two structural problems found since are worth more attention than anything left
+on the original list, because neither was visible as a bug: **an identifier with
+three definitions**, and **a frozen wire format whose parameters were read from
+a dependency at import time**. Both are now fixed. Both had the same shape —
+something that looked settled was not, and nothing failed to say so.
+
+---
+
+## Part 1 — Disposition of the 2026-05-28 findings
+
+### Closed (19)
+
+| ID | Finding | Evidence |
+| --- | --- | --- |
+| P0-1 | `verify_proof_with_tag` cryptographic stub, publicly exported | Removed. `vault/migrate.py:383` carries a NOTE recording the removal; no longer in `vault/__init__`. |
+| P0-3 | Lock-server HMAC did not cover the timestamp | `http_delegate._sign` now signs `f"{timestamp}\n{nonce}\n{body}"` (`:289-303`). A nonce was added beyond the recommendation. |
+| P0-5 | Unbounded upload / decompression bomb | `Image.MAX_IMAGE_PIXELS` set explicitly (`app.py:988`, `pwa_api.py:53`), `MAX_CONTENT_LENGTH` enforced, and an explicit `h * w > _MAX_IMAGE_PIXELS` check returning 413 (`app.py:1100`). |
+| P0-6 | No rate limiting on any endpoint | `server/rate_limit.py` (token bucket); `@rate_limit(...)` applied across `app.py`, `pwa_api.py`, `anchor_api.py`. |
+| P1-1 | `--cors '*'` accepted | `_validate_cors_origin` (`pwa_api.py:340`) refuses `*` and any origin containing it, and requires an explicit scheme and host. |
+| P1-2 | Anchor silently bootstrapped a dummy BTC block | Now requires `ESOPTRON_ALLOW_DEV_DEFAULTS=1` to fall back (`anchor_api.py:410-423`). |
+| P1-3 | Deployment secret key written without an explicit mode | `_persist` calls `restrict_secret_file(self.path)` (`anchor_api.py:198`). *See N-4: a residual window remains.* |
+| P1-4 | `EopxKey.save` chmod is a silent no-op on Windows | `format/file_perms.py`: POSIX `0o600`, Windows DACL via `icacls`, warning when neither succeeds. |
+| P1-5 | No Argon2 mobile tier | `ARGON2_PROFILES` now carries `workstation` and `mobile` (`recovery.py:83-92`). |
+| P1-6 | `MigrationProof.timestamp` not bound into the proof | `_compute_challenge_hash` mixes `struct.pack(">d", timestamp)` into the Fiat-Shamir hash (`migrate.py:145`). |
+| P1-8 | No ceremony-launch attestation (Protocol E) | Implemented in `vault/genesis.py`; covered by `tests/test_ceremony_attestation.py`. |
+| P1-9 | `kyber_pk_fp == ZEROS_32` bypassed the consistency check | The zero fingerprint with a key present now raises (`eopx_format.py:163-167`), as does a missing chunk. |
+| P2-1 | `load_or_init` key-file race | `os.O_CREAT \| os.O_EXCL` claim (`anchor_api.py:124`). |
+| P2-2 | Suite could not collect without `pqcrypto` | *(same-day)* Import deferred behind `_backend()` in `format/keys.py`; pure-Python modules import without the stack. Applied to five other modules the same day. |
+| P2-3 | `_hkdf_sha3_256` duplicated three times | One definition in `metatron/field.py`. |
+| P2-4 | No fuzz / property tests | `tests/test_property_fuzz.py`; `hypothesis` is a declared dev dependency. |
+| P2-5 | `_zeroize` used a Python loop | `_ctypes_memset` with a documented fallback (`secure_bytes.py:25-32`). |
+| P2-6 | `card_fingerprint` coerced instead of validating | Explicit `0 <= s < 13` guard raising `ValueError` (`verify_card.py:40`). |
+| P2-8 | `GenesisSeal` signed-field drift | `tests/test_genesis_token.py:322` enumerates the canonical fields. |
+
+### Partially closed (3)
+
+**P0-4 — raw frame persistence.** The reported `out/last_upload.jpg` is gone and
+the upload dump is now gated (`_DEBUG_DUMP_FRAMES and config.mode != "private"`,
+`app.py:1080`), exactly as recommended. **But two diagnostic writes in the
+decode path are not gated at all**: `_save_diagnostic_img(pil,
+"diagnostic_cube_crop.png")` (`app.py:219`) and `_save_diagnostic(rect_a4,
+cfg)` (`app.py:231`) write to `out/` on every decode, and `_save_diagnostic`
+takes `cfg` without consulting `cfg.mode`. The residual is the more sensitive
+half of the original finding: the cube crop is precisely the decodable region
+of a PRIVATE sheet, written to a predictable shared path. See N-3.
+
+**P0-2 — divergent `esoptron.mobile.*` KDF chain.** Not removed, but no longer
+shipped: the `/scan` HTML route is disabled by default and gated behind
+`ESOPTRON_ENABLE_LEGACY_MOBILE_HTML=1`, and the module docstring now opens with
+"DEV / DEMO ONLY". Five `esoptron.mobile.*` SHA-256 info strings remain in the
+file (`app.py:878-889`). The exposure is closed; the divergence is not, and a
+second chain that can be re-enabled by an environment variable is a chain that
+will eventually be re-enabled.
+
+**P1-7 — unauthenticated `psnx` registry.** Now rate-limited (`@rate_limit`) and
+documented as demo-grade, which addresses the DoS half. There is still no
+authentication on the write path, as the recommendation asked for.
+
+### Reclassified (1)
+
+**P2-7 — `app.py` single-tenant trust model.** The report asked only that the
+docs make the demo status clear. The module docstring now leads with "DEV /
+DEMO ONLY … NOT suitable for" production. Closed as documented.
+
+---
+
+## Part 2 — Findings raised since 2026-05-28
+
+### N-1 — `vault_fp` had three definitions *(same-day fix)*
+
+**Severity: high.** Three derivations coexisted and disagreed for one vault:
+
+```
+card_fingerprint(card)                        74ad6428…7123f910   vault/enroll, vault/genesis, collection
+sha3_256("esoptron.vault_fp.v1|" + seed)      29f96634…b3bd96a5   scripts/make_invitation.py
+sha3_256("epx-h.badge.vault_fp.v1" + spinor)  bb212913…cd5b02f2   scripts/eopx_badge.py
+```
+
+Everything keyed by `vault_fp` therefore depended on which call site the caller
+had come through: the anchor's `vault_anchors` index, the EPX-H seal geometry,
+and `egg_token.founder_egg`, which **draws a golden egg from it** — so an
+attribution whose whole legitimacy rests on being a fair draw was a draw over an
+identity nobody had agreed on.
+
+EPX-G §143 already required the card fingerprint. It is also the only one of the
+three a *scan* can produce, and the seed-derived variant could never be
+recomputed by a verifier at all. Fixed in `eopx.vault.identity`; the abandoned
+domain strings are now grepped for by `tests/test_vault_identity.py`.
+
+### N-2 — the wire format took its parameters from the dependency *(same-day fix)*
+
+**Severity: high.** `format/keys.py` read the six ML-DSA-87 / ML-KEM-1024 sizes
+off `pqcrypto` at import time, and `eopx_format` validates a `.eopx` against
+them — `pack` rejects a public key that is not `SIG_PUBLIC_KEY_SIZE` bytes,
+`verify` rejects a signature that is not `SIG_SIGNATURE_SIZE`. The admissibility
+rules of a **frozen** format therefore moved with whatever the installed library
+defined; a backend rebound to another parameter set would have been followed
+rather than refused. Sizes are now pinned to the FIPS 204 / FIPS 203 literals
+and the backend is checked against them on first use.
+
+### N-3 — diagnostic image dumps are ungated (OPEN)
+
+**Severity: medium.** See P0-4 above. `app.py:219` and `:231` persist the
+rectified A4 and the cube crop unconditionally. Recommendation: gate both on
+`_DEBUG_DUMP_FRAMES` and refuse them outright when `cfg.mode == "private"`,
+matching the treatment the upload path already received. Effort: under an hour.
+
+### N-4 — the deployment key's temp file is written before it is restricted (OPEN)
+
+**Severity: low-medium.** `_persist` writes the secret keys with
+`tmp.write_text(...)`, renames, and only then calls `restrict_secret_file`
+(`anchor_api.py:194-198`). The temporary file is created with the process
+umask — commonly world-readable — and holds the Dilithium and Kyber secret keys
+for the duration of the write and rename. Recommendation: create the temp file
+with `os.open(..., O_CREAT | O_WRONLY | O_EXCL, 0o600)` so it is never
+permissive, and keep `restrict_secret_file` as the cross-platform backstop.
+
+### N-5 — a fourth derivation is *named* `vault_fp` (OPEN)
+
+**Severity: low, but a trap.** `collection/forge.relic_vault_fp()` is
+`sha3_256(relic.artifact_id())` — a fourth thing called a vault fingerprint. It
+is legitimate: a relic is an artifact, not a vault, and the value only seeds the
+seal geometry. But the name invites exactly the confusion N-1 was about, and the
+grep guard in `tests/test_vault_identity.py` does not catch it.
+
+**Do not change its value**: the twelve relics minted on the live anchor derive
+their badge seals from it. Rename only — `relic_seal_seed` — and add a test
+pinning the value across the rename.
+
+### N-6 — the founder egg draw is not verifiable (OPEN)
+
+**Severity: medium (integrity of a published claim).**
+`docs/GENESIS_COMMITMENT.md` states that "anyone can recompute every position
+from the block hash alone — no secret input". That is true for the 555-egg
+clutch, which this audit re-derived and confirmed field for field (GE-111,
+Lunar, position 106,186,118, `egg_hash f37eaeef…`). It is **false for the
+founder draw**, whose input is the vault fingerprint and which the document
+records only truncated (`f02cc7…d7be`). Nobody can check that GE-111 is the egg
+vault #1 drew.
+
+The vault in question has since been abandoned, so the attribution is moot — but
+the promise is unqualified in a committed document, and the next attribution
+must record the full fingerprint or it will inherit the same gap.
+
+### N-7 — CI never installed OpenCV *(fixed)*
+
+`ci.yml` installed `.[dev,server]` and nothing else; `cv2` was absent on all six
+Python jobs and ~15 test modules failed at import. `main` was red from the merge
+of #24 until it was fixed. The `typescript` and `pwa` jobs were unaffected,
+which is how a fully red Python matrix went unnoticed.
+
+### N-8 — a property test asserted something false *(fixed)*
+
+`test_fewer_than_k_does_not_recover` generated secrets from one byte up and
+asserted that a sub-quorum reconstruction differs from the secret. Below `k`
+shares Shamir reveals nothing, which means the reconstruction is independent of
+the secret and uniform — so for a one-byte secret it equals the secret one time
+in 256. The assertion was false at that size and failed on macOS CI.
+`min_size` is now 16.
+
+### N-9 — a spec test vector contradicted another spec *(fixed)*
+
+`EPX-2 §4.1` pinned `vault_fp_hex = 29f96634…`, the seed-derived value, while
+`EPX-G §143` defines `vault_fp` as the card fingerprint. A port reproducing
+EPX-2 byte for byte would have disagreed with the implementation. Corrected and
+re-recorded in `SPECS.SHA3-256`.
+
+---
+
+## Part 3 — What this pass did not cover
+
+An audit is worth as much as its stated limits.
+
+* **No independent review of the same-day fixes** (N-1, N-2, P2-2). Declared above.
+* **No dynamic testing of the deployed services.** The live anchor was queried
+  read-only (`/anchor/api/v1/artifact/capability`: 12 relics, 0 instated, 0
+  controller). No penetration testing, no load testing, no TLS or reverse-proxy
+  review of the Caddy configuration on the VPS.
+* **No review of the Eidolon side.** The golden-egg integration is absent there
+  (one mention, in `src/ui/launcher.py`), which is a gap in *that* tree.
+* **No cryptographic review of primitives.** The 2026-05-28 report's judgement on
+  domain separation, constant-time comparison and CSPRNG use was accepted rather
+  than re-derived.
+* **No coverage measurement.** "901 tests collected, green" is a count, not
+  coverage. `pytest-cov` is available and was not run.
+* **Scalability bottlenecks** from the previous report (anchor SQLite writer
+  lock, Argon2 on mobile, the lock server as a SPOF) were not re-measured. Only
+  the Argon2 item has a code change (the mobile profile).
+
+---
+
+## Part 4 — Recommended order
+
+1. **N-3** — gate the diagnostic dumps. Smallest item, and it closes the last
+   piece of a P0.
+2. **N-4** — create the deployment key's temp file at `0o600`.
+3. **N-6** — record the full vault fingerprint with the next founder attribution,
+   and either qualify or repair the recomputability claim in
+   `GENESIS_COMMITMENT.md`.
+4. **N-5** — rename `relic_vault_fp` to `relic_seal_seed`, value unchanged,
+   pinned by a test.
+5. **P0-2 residual** — decide whether the legacy mobile chain is retired or kept.
+   An environment variable is a decision deferred, not a decision made.
+6. **P1-7 residual** — authenticate the `psnx` registry write path.
+
+Nothing on this list blocks publication in the way the 2026-05-28 P0s did.
+
+---
+
+## Sign-off
+
+The operational surface that the previous report identified as the weak spot has
+been substantially hardened, and the test suite went from *uncollectable on the
+maintainer's own machine* to 901 green tests with CI green on eight jobs across
+three operating systems.
+
+The two most interesting findings of this pass were not in either report's
+original scope, and they rhyme: an identifier with three definitions, and a
+frozen format taking its parameters from a dependency. Neither produced a
+failure. Both would have produced a wrong answer that looked right — which is
+the failure mode worth designing tests against, and the reason the two fixes
+ship with tests that assert against *specifications* rather than against the
+implementation's current output.
+
+— End of report —

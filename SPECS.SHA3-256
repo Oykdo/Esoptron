@@ -212,3 +212,11 @@ bytes-normalised:  16037
 normalisation:     utf8+nobom+lf+striptrailws+finallf+nfc
 author:            Jérémy ZGONEC
 timestamp:         2026-09-09T14:41:20Z
+
+spec:              docs/audit_report_2026-09-09.md
+hash:              sha3-256:d61c127a1570b4c086cbbee2a0f61e70f38c79928e2c71067f7031b7d44b4bd4
+bytes-raw:         15678
+bytes-normalised:  15678
+normalisation:     utf8+nobom+lf+striptrailws+finallf+nfc
+author:            Jérémy ZGONEC
+timestamp:         2026-09-09T16:49:07Z
