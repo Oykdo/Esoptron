@@ -27,7 +27,11 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,server]"
+          # opencv comes from the headless wheel, not the `scanner` extra: same
+          # cv2 module and the same contrib modules (cv2.aruco), without the
+          # libGL the GUI build needs and a CI runner does not have. Without it
+          # ~15 test modules fail to collect on every platform.
+          python -m pip install -e ".[dev,server]" opencv-contrib-python-headless
       - name: Encoding check (UTF-8 + LF)
         run: python tools/check_encoding.py
       - name: Spec manifest verify

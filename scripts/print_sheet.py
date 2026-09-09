@@ -171,6 +171,113 @@ def cube_rect_in_page() -> tuple:
     return (cube_x, cube_y, cube_px)
 
 
+# ---------- Reserved regions: paper no decoration may touch ----------
+
+# Blank paper kept between any decoration and a region that is read. Ink near
+# the 91 carriers or near an ArUco is paid for out of the measured decode
+# envelope (`scripts/detect_envelope.py`), and the geometry axis is already the
+# weak link — EPX-H answered this with an exclusion mask, EPX-F answers it by
+# staying off the cube entirely.
+DECOR_QUIET_MM = 4.0
+
+# Chromatic scan grid, laid out once so the renderer and the guard cannot
+# disagree about where it is.
+GRID_CELL_MM = 3.5
+GRID_CELL_PX = mm(GRID_CELL_MM)
+
+
+def warn_strip_y() -> int:
+    """Top of the bottom warning strip — the floor for anything above it."""
+    return PAGE_H - mm(FIDUCIAL_INSET_MM) - mm(FIDUCIAL_MM) - mm(14.0)
+
+
+def chroma_grid_rect(foot_y: int) -> Tuple[int, int, int, int]:
+    """(x, y, w, h) of the chromatic scan grid, given where the footer ended."""
+    from eopx.metatron.grid_render import GRID_ROWS, GRID_COLS
+    cell = GRID_CELL_PX
+    gap = max(2, cell // 10)
+    header = max(14, cell // 2)
+    w = header + gap + GRID_COLS * (cell + gap) + gap
+    h = header + gap + GRID_ROWS * (cell + gap) + gap
+    return (PAGE_W - w) // 2, foot_y + mm(2.0), w, h
+
+
+def reserved_regions(foot_y: Optional[int] = None) -> list:
+    """Rectangles that carry data and must stay clear of decoration.
+
+    The cube (its 91 carriers), the four page-corner ArUco with their quiet
+    zones, and — when ``foot_y`` is known — the chromatic scan grid. Each is
+    inflated by :data:`DECOR_QUIET_MM`.
+    """
+    q = mm(DECOR_QUIET_MM)
+    cube_x, cube_y, cube_px = cube_rect_in_page()
+    out = [("cube", (cube_x - q, cube_y - q,
+                     cube_x + cube_px + q, cube_y + cube_px + q))]
+
+    inset = mm(FIDUCIAL_INSET_MM)
+    side = mm(FIDUCIAL_MM)
+    quiet = mm(FIDUCIAL_QUIET_MM) + q
+    for name, (x, y) in (
+        ("aruco TL", (inset, inset)),
+        ("aruco TR", (PAGE_W - inset - side, inset)),
+        ("aruco BR", (PAGE_W - inset - side, PAGE_H - inset - side)),
+        ("aruco BL", (inset, PAGE_H - inset - side)),
+    ):
+        out.append((name, (x - quiet, y - quiet,
+                           x + side + quiet, y + side + quiet)))
+
+    if foot_y is not None:
+        gx, gy, gw, gh = chroma_grid_rect(foot_y)
+        out.append(("scan grid", (gx - q, gy - q, gx + gw + q, gy + gh + q)))
+    return out
+
+
+def _overlaps(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def assert_clear(rect: Tuple[int, int, int, int], what: str,
+                 foot_y: Optional[int] = None) -> None:
+    """Raise unless ``rect`` touches nothing that is read.
+
+    A layout constant edited by hand is exactly how ink ends up on a carrier,
+    so the placement is checked at render time rather than trusted.
+    """
+    for name, region in reserved_regions(foot_y):
+        if _overlaps(rect, region):
+            raise ValueError(
+                f"{what} at {rect} overlaps the {name} region {region}: "
+                "decoration must never be drawn on anything that is read"
+            )
+    if not (0 <= rect[0] and rect[2] <= PAGE_W
+            and 0 <= rect[1] and rect[3] <= PAGE_H):
+        raise ValueError(f"{what} at {rect} falls off the page")
+
+
+def figure_plate_slot(foot_y: int) -> Optional[Tuple[int, int, int]]:
+    """(x, y, cell_px) for the EPX-F plate, or ``None`` when it will not fit.
+
+    The plate sits to the **right of the chromatic scan grid**, sharing its top
+    edge: the two plates then read as what they are — the machine channel and
+    the face a human compares — without either one approaching the cube. The
+    cell size is the largest that clears the page margin, so shrinking the page
+    furniture shrinks the runes instead of colliding with them.
+    """
+    from eopx.figure_render import plate_pixel_size
+
+    gx, gy, gw, gh = chroma_grid_rect(foot_y)
+    q = mm(DECOR_QUIET_MM)
+    left = gx + gw + q
+    avail_w = (PAGE_W - mm(SAFE_MARGIN_MM)) - left
+    avail_h = warn_strip_y() - mm(2.0) - gy
+
+    for cell_px in range(mm(3.6), mm(1.6) - 1, -1):
+        w, h = plate_pixel_size(cell_px)
+        if w <= avail_w and h <= avail_h:
+            return left, gy, cell_px
+    return None
+
+
 def draw_corner_fiducial(img: Image.Image,
                          x: int, y: int, side: int,
                          marker_id: int,
@@ -256,7 +363,8 @@ def draw_scale_bar(d: ImageDraw.ImageDraw,
 
 def make_sheet(symbols, role: str, label: str, hash_hex: str,
                extra_lines: Optional[list] = None,
-               cube_renderer=None, egg=None) -> Image.Image:
+               cube_renderer=None, egg=None,
+               figure: Optional[Tuple[bytes, bytes]] = None) -> Image.Image:
     """Compose the full A4 page.
 
     cube_renderer:
@@ -268,6 +376,12 @@ def make_sheet(symbols, role: str, label: str, hash_hex: str,
         Optional :class:`eopx.egg_token.GoldenEgg` won by this vault. When
         given, its emblem is engraved in the right margin beside the cube
         (brand/legend, not security — the signed EggSeal is the real record).
+    figure:
+        Optional ``(merkle_root, dilithium_pk_fp)`` — the two pre-image
+        manifest fields of a `.eopx`. Draws the EPX-F face as a runic plate
+        beside the scan grid, with the tag a reader recomputes from the file.
+        The pair is passed raw rather than as a ready-made grid so the printed
+        plate cannot disagree with the printed tag.
     """
     img = Image.new("RGB", (PAGE_W, PAGE_H), BG)
     d = ImageDraw.Draw(img)
@@ -378,19 +492,22 @@ def make_sheet(symbols, role: str, label: str, hash_hex: str,
             foot_y += mm(3.0)
 
     # --- Chromatic scan grid (6-color base-6 encoding) ---
-    from eopx.metatron.grid_render import render_grid_on_a4, GRID_ROWS, GRID_COLS
-    grid_cell_mm = 3.5
-    grid_cell_px = mm(grid_cell_mm)
-    grid_gap_px = max(2, grid_cell_px // 10)
-    grid_header_px = max(14, grid_cell_px // 2)
-    grid_w = grid_header_px + grid_gap_px + GRID_COLS * (grid_cell_px + grid_gap_px) + grid_gap_px
-    grid_h = grid_header_px + grid_gap_px + GRID_ROWS * (grid_cell_px + grid_gap_px) + grid_gap_px
-    grid_x = (PAGE_W - grid_w) // 2
-    grid_y = foot_y + mm(2.0)
+    from eopx.metatron.grid_render import render_grid_on_a4
+    grid_x, grid_y, grid_w, grid_h = chroma_grid_rect(foot_y)
     # Only render if it fits before the warning strip
-    warn_y_estimate = PAGE_H - inset - fid_side - mm(14.0)
-    if grid_y + grid_h + mm(2.0) < warn_y_estimate:
-        render_grid_on_a4(img, symbols, grid_y, grid_x, grid_cell_px)
+    if grid_y + grid_h + mm(2.0) < warn_strip_y():
+        render_grid_on_a4(img, symbols, grid_y, grid_x, GRID_CELL_PX)
+
+    # --- EPX-F figure plate (runes, beside the scan grid, never on the cube) ---
+    if figure is not None:
+        slot = figure_plate_slot(foot_y)
+        if slot is not None:
+            from eopx.figure_render import render_artifact_plate
+            px, py, cell_px = slot
+            plate = render_artifact_plate(figure[0], figure[1], cell_px=cell_px)
+            assert_clear((px, py, px + plate.width, py + plate.height),
+                         "EPX-F figure plate")
+            img.paste(plate, (px, py))
 
     # --- Bottom warning strip for PRIVATE ---
     if is_private:
@@ -487,6 +604,35 @@ def _resolve_egg(vault_hex: str):
     return founder_egg(vault_fp, block, height)
 
 
+# ---------- EPX-F figure resolution ----------
+
+def _resolve_figure(merkle_hex: Optional[str],
+                    fp_hex: Optional[str]) -> Optional[Tuple[bytes, bytes]]:
+    """Parse the two pre-image manifest fields, or return ``None``.
+
+    Both or neither: half a figure is not a smaller figure, it is a plate whose
+    epoch band is a guess.
+    """
+    if merkle_hex is None and fp_hex is None:
+        return None
+    if merkle_hex is None or fp_hex is None:
+        raise SystemExit(
+            "--figure-merkle and --figure-key-fp go together: EPX-F takes "
+            "both merkle_root and dilithium_pk_fp"
+        )
+    out = []
+    for name, value in (("--figure-merkle", merkle_hex),
+                        ("--figure-key-fp", fp_hex)):
+        try:
+            raw = bytes.fromhex(value.strip())
+        except ValueError:
+            raise SystemExit(f"{name} must be valid hex")
+        if len(raw) != 32:
+            raise SystemExit(f"{name} must be 32 bytes (64 hex chars)")
+        out.append(raw)
+    return out[0], out[1]
+
+
 # ---------- CLI ----------
 
 def main(argv: list[str]) -> int:
@@ -510,12 +656,20 @@ def main(argv: list[str]) -> int:
                    help="64-hex vault fingerprint: engrave the Golden Egg this "
                         "vault wins from the committed Genesis block "
                         "(needs ESOPTRON_BTC_BLOCK_HASH / _HEIGHT).")
+    p.add_argument("--figure-merkle", metavar="HEX",
+                   help="64-hex merkle_root from a .eopx manifest: draw the "
+                        "EPX-F face beside the scan grid (needs "
+                        "--figure-key-fp).")
+    p.add_argument("--figure-key-fp", metavar="HEX",
+                   help="64-hex dilithium_pk_fp from the same manifest; sets "
+                        "the figure's epoch band.")
     args = p.parse_args(argv[1:])
 
     symbols, role, hash_hex, label = _resolve_inputs(args)
 
     egg = _resolve_egg(args.egg_vault) if args.egg_vault else None
-    img = make_sheet(symbols, role, label, hash_hex, egg=egg)
+    figure = _resolve_figure(args.figure_merkle, args.figure_key_fp)
+    img = make_sheet(symbols, role, label, hash_hex, egg=egg, figure=figure)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

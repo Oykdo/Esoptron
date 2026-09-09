@@ -27,9 +27,9 @@ import numpy as np
 from PIL import Image
 
 from .graph import VERTICES, EDGES, NUM_VERTICES, NUM_EDGES
-from .palette import classify_color
+from .palette import classify_color, classify_margin
 from .render import (
-    DEFAULT_CANVAS, MARGIN_FRAC, VERTEX_RADIUS_FRAC,
+    DEFAULT_CANVAS, VERTEX_RADIUS_FRAC,
     EDGE_TAG_RADIUS_FRAC, _project, edge_tag_position,
 )
 
@@ -74,8 +74,11 @@ def _sample_ring_color(arr: np.ndarray, cx: float, cy: float,
 def _classify_edge_tag(arr: np.ndarray,
                        p1: Tuple[float, float],
                        p2: Tuple[float, float],
-                       canvas_size: int) -> Tuple[int, float]:
+                       canvas_size: int) -> Tuple[int, float, float]:
     """Sample the colored disk attached to an edge and classify its color.
+
+    Returns ``(symbol, distance, margin)``; see
+    :func:`~eopx.metatron.palette.classify_margin` for what the margin buys.
 
     Uses local search: scan a small window around the canonical tag
     position to find the pixel cluster with the highest saturation
@@ -93,7 +96,7 @@ def _classify_edge_tag(arr: np.ndarray,
     y0 = max(0, int(cy - search_r))
     y1 = min(h, int(cy + search_r + 1))
     if x1 <= x0 or y1 <= y0:
-        return classify_color(0, 0, 0)
+        return classify_margin(0, 0, 0)
 
     sub = arr[y0:y1, x0:x1, :].astype(np.float32)
     ys, xs = np.ogrid[y0:y1, x0:x1]
@@ -110,7 +113,7 @@ def _classify_edge_tag(arr: np.ndarray,
     # within the mask, compute their spatial centroid, then sample a disk
     # around that centroid.
     if mask.sum() == 0:
-        return classify_color(0, 0, 0)
+        return classify_margin(0, 0, 0)
 
     cf_masked = np.where(mask, colorfulness, 0)
     threshold = np.percentile(cf_masked[mask], 75)
@@ -120,7 +123,7 @@ def _classify_edge_tag(arr: np.ndarray,
         # Fallback: just sample at the canonical center
         sample_r = max(3.0, r_tag * 0.60)
         rgb = _sample_disk_color_inner(arr, cx, cy, sample_r)
-        return classify_color(*rgb)
+        return classify_margin(*rgb)
 
     # Centroid of the most-colorful pixels = refined tag center.
     sub_ys, sub_xs = np.where(bright_mask)
@@ -130,15 +133,19 @@ def _classify_edge_tag(arr: np.ndarray,
     # Sample a disk around the refined center.
     sample_r = max(3.0, r_tag * 0.55)
     rgb = _sample_disk_color_inner(arr, refined_cx, refined_cy, sample_r)
-    sym, d = classify_color(*rgb)
+    sym, d, m = classify_margin(*rgb)
 
     # Also classify at the canonical center and take majority if they disagree.
     rgb2 = _sample_disk_color_inner(arr, cx, cy, sample_r)
-    sym2, d2 = classify_color(*rgb2)
+    sym2, d2, m2 = classify_margin(*rgb2)
     if sym != sym2:
-        # Disagreement: try both, pick the one with lower Oklab distance.
-        return (sym, d) if d < d2 else (sym2, d2)
-    return sym, d
+        # Disagreement: two samples read different symbols, so neither is
+        # decided. Keep the closer one, but report the *disagreement* as the
+        # doubt: the margin between them is what the erasure logic should see.
+        if d < d2:
+            return sym, d, min(m, abs(d - d2))
+        return sym2, d2, min(m2, abs(d - d2))
+    return sym, d, m
 
 
 def _refine_vertex_position(arr: np.ndarray, cx: float, cy: float,
@@ -210,12 +217,29 @@ def _sample_disk_color_inner(arr: np.ndarray, cx: float, cy: float, r: float
 
 
 def extract_canonical(img: Image.Image
-                     ) -> Tuple[List[int], List[float]]:
-    """Extract 91 F_13 symbols + per-carrier confidences from a canonical image.
+                      ) -> Tuple[List[int], List[float]]:
+    """Extract 91 F_13 symbols + per-carrier distances from a canonical image.
+
+    Kept at two return values because that is what every caller since the
+    beginning expects; :func:`extract_canonical_full` adds the margins, which
+    are the signal the erasure logic actually wants.
+    """
+    symbols, distances, _margins = extract_canonical_full(img)
+    return symbols, distances
+
+
+def extract_canonical_full(img: Image.Image
+                           ) -> Tuple[List[int], List[float], List[float]]:
+    """Extract 91 symbols with both doubt signals: distances **and margins**.
 
     Uses local color search for edge tags (finds the most-colorful cluster
     near the canonical position to compensate for homography misalignment)
     and multi-sample majority voting for vertices.
+
+    The margin — how much closer a carrier sits to its symbol than to the
+    runner-up — is what separates a misread from a good read. Absolute
+    distance does not: under a mediocre photograph the two distributions
+    overlap almost entirely (see ``scripts/detect_envelope.py``).
     """
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -226,6 +250,7 @@ def extract_canonical(img: Image.Image
 
     symbols: List[int] = [0] * (NUM_VERTICES + NUM_EDGES)
     distances: List[float] = [0.0] * (NUM_VERTICES + NUM_EDGES)
+    margins: List[float] = [0.0] * (NUM_VERTICES + NUM_EDGES)
 
     # --- Vertices: local color search + multi-sample ring, majority-vote ---
     r_v = size * VERTEX_RADIUS_FRAC
@@ -244,36 +269,43 @@ def extract_canonical(img: Image.Image
                    (0.0, 2.0), (0.0, -2.0)]
         votes = []
         best_d = 999.0
-        best_sym = 0
+        best_margin = 0.0
         for dx, dy in offsets:
             rgb = _sample_ring_color(arr, refined_cx + dx, refined_cy + dy,
                                       r_inner, r_outer)
-            sym, d = classify_color(*rgb)
+            sym, d, m = classify_margin(*rgb)
             votes.append(sym)
             if d < best_d:
                 best_d = d
-                best_sym = sym
+                best_margin = m
         # Also try disk sampling at refined position (more tolerant of blur)
-        from collections import Counter as _Counter
         disk_r = r_v * 0.80
         rgb_disk = _sample_disk_color_inner(arr, refined_cx, refined_cy, disk_r)
-        sym_disk, d_disk = classify_color(*rgb_disk)
+        sym_disk, d_disk, m_disk = classify_margin(*rgb_disk)
         votes.append(sym_disk)
         if d_disk < best_d:
             best_d = d_disk
-            best_sym = sym_disk
-        symbols[i] = _Counter(votes).most_common(1)[0][0]
+            best_margin = m_disk
+        counts = Counter(votes).most_common()
+        symbols[i] = counts[0][0]
         distances[i] = best_d
+        # A split vote is doubt no distance can express: the samples read
+        # different symbols, so the carrier is a prime erasure candidate
+        # whatever the winning sample's own margin says.
+        if len(counts) > 1 and counts[0][1] - counts[1][1] <= 1:
+            best_margin = 0.0
+        margins[i] = best_margin
 
     # --- Edges: read the colored tag at each canonical tag position ---
     for j, (vi, vj) in enumerate(EDGES):
         p1 = _project(VERTICES[vi], size)
         p2 = _project(VERTICES[vj], size)
-        sym, d = _classify_edge_tag(arr, p1, p2, canvas_size=size)
+        sym, d, m = _classify_edge_tag(arr, p1, p2, canvas_size=size)
         symbols[NUM_VERTICES + j] = sym
         distances[NUM_VERTICES + j] = d
+        margins[NUM_VERTICES + j] = m
 
-    return symbols, distances
+    return symbols, distances, margins
 
 
 def extract_robust(img: Image.Image,
@@ -286,22 +318,38 @@ def extract_robust(img: Image.Image,
                with the symbols/distances that produced it.
                If None, just returns the first extract_canonical result.
     """
-    from .reed_solomon import TOTAL_N
-
     if img.mode != "RGB":
         img = img.convert("RGB")
     arr = np.asarray(img).copy()
     size = img.size[0]
 
     # Strategy 1: default extraction (local search + multi-sample)
-    syms, dists = extract_canonical(img)
+    syms, dists, margins = extract_canonical_full(img)
     if decode_fn is None:
         return syms, dists
     result = decode_fn(syms, erasures_from_confidences(dists))
     if result:
         return syms, dists
 
-    # Strategy 2: try with erasures flagged at a lower threshold
+    # Strategy 2: spend the erasure budget per block, ranked by margin.
+    #
+    # Order matters. A block satisfies 2t + e <= 3, so one erasure still
+    # leaves one correctable error while three leave none — climb, never
+    # start at the top. Measured on a mediocre photograph (worst block 2),
+    # one margin-ranked erasure per block turns a failure into the right
+    # seed, where every distance-ranked variant fails. Three per block is
+    # deliberately absent: with t=0 it does not recover the hard cases and
+    # it invites a miscorrection, which is worse than a refusal.
+    for n in (1, 2):
+        era = erasures_per_block(dists, margins=margins, max_per_block=n)
+        if not era:
+            continue
+        result = decode_fn(syms, erasures=era)
+        if result:
+            return syms, dists
+
+    # Strategy 2b: the historical global thresholds, kept as a fallback for
+    # damage the margin does not see (a whole region washed out, say).
     for threshold in [0.15, 0.10, 0.07]:
         era = erasures_from_confidences(dists, threshold=threshold)
         if len(era) > 21:
@@ -330,7 +378,6 @@ def extract_robust(img: Image.Image,
 
     # Strategy 4: re-extract vertices with larger position offsets
     # to compensate for homography misalignment on phone photos
-    _Counter = None  # lazy import
     for offset in [4.0, 8.0]:
         alt_syms = list(syms)
         alt_dists = list(dists)
@@ -343,7 +390,6 @@ def extract_robust(img: Image.Image,
                 arr, cx, cy, r_v, r_v * 3.0, size)
             votes = []
             best_d = 999.0
-            best_sym = 0
             for dx, dy in [(0,0), (offset,0), (-offset,0),
                            (0,offset), (0,-offset)]:
                 rgb = _sample_ring_color(arr, refined_cx+dx, refined_cy+dy,
@@ -352,10 +398,7 @@ def extract_robust(img: Image.Image,
                 votes.append(sym)
                 if d < best_d:
                     best_d = d
-                    best_sym = sym
-            if _Counter is None:
-                from collections import Counter as _Counter
-            alt_syms[i] = _Counter(votes).most_common(1)[0][0]
+            alt_syms[i] = Counter(votes).most_common(1)[0][0]
             alt_dists[i] = best_d
         result = decode_fn(alt_syms)
         if result:
@@ -407,6 +450,64 @@ def erasures_from_confidences(distances: Sequence[float],
                               ) -> List[int]:
     """Return the list of carrier positions whose distance exceeds threshold."""
     return [i for i, d in enumerate(distances) if d > threshold]
+
+
+def erasures_per_block(distances: Sequence[float], *,
+                       margins: Optional[Sequence[float]] = None,
+                       max_per_block: int = 1,
+                       min_distance: float = 0.03,
+                       max_margin: float = 0.06) -> List[int]:
+    """Flag the least-confident carriers *within each interleaved RS block*.
+
+    A global threshold ignores the shape of the budget. The code is RS(13,10)
+    interleaved seven ways: each block tolerates three erasures on its own, and
+    an erasure only helps the block it lands in. Ten doubtful carriers crowded
+    into one block are ten wasted flags; one flag in each of seven blocks is
+    seven repairs.
+
+    ``max_per_block`` also decides how much error-correction survives, since a
+    block satisfies ``2t + e <= 3``:
+
+    ==================  ====================================
+    erasures per block  errors still correctable in that block
+    ==================  ====================================
+    0                   1
+    1                   1
+    2                   0
+    3                   0
+    ==================  ====================================
+
+    So ``max_per_block=1`` is the frugal choice — it repairs one carrier *and*
+    keeps a correction in hand — while 3 only pays off when all three of a
+    block's errors are among the flagged. Callers should climb that ladder
+    rather than start at the top.
+
+    Pass ``margins`` (from :func:`extract_canonical_full`) and carriers are
+    ranked by *ascending margin* instead of descending distance, which is the
+    ranking that works. Measured on a mediocre photograph: misread carriers
+    have a median margin of 0.034 against 0.092 for correct ones, and rank
+    second in their block; ranked by distance they land mid-pack, because a
+    shadow pushes every carrier away from the palette at once and a difference
+    cancels what a magnitude cannot.
+
+    ``min_distance`` / ``max_margin`` keep confident carriers out: a pristine
+    render classifies below 0.05 with wide margins, and flagging a symbol that
+    was never in doubt spends budget for nothing.
+    """
+    from .reed_solomon import NUM_BLOCKS
+
+    out: List[int] = []
+    for block in range(NUM_BLOCKS):
+        carriers = [i for i in range(len(distances)) if i % NUM_BLOCKS == block]
+        if margins is not None:
+            carriers.sort(key=lambda i: margins[i])
+            out.extend(i for i in carriers[:max_per_block]
+                       if margins[i] < max_margin)
+        else:
+            carriers.sort(key=lambda i: distances[i], reverse=True)
+            out.extend(i for i in carriers[:max_per_block]
+                       if distances[i] > min_distance)
+    return sorted(out)
 
 
 # ---------------------------------------------------------------------------

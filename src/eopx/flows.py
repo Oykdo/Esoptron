@@ -145,6 +145,18 @@ class ScanResult:
     detection_method: Optional[str] = None
     markers_used: Optional[int] = None
 
+    # How much the read had to be repaired, and whether anything actually
+    # confirmed it. ``symbols_verified`` is True only for a read that needed
+    # no correction at all; a decode that leaned on the RS layer is reported
+    # as unverified rather than as a success, because nothing at this layer
+    # can audit it (see reed_solomon.blocks_out_of_code). The confirmation a
+    # caller should wait for lives above: the derived key opening the vault,
+    # or the fingerprint matching a registry.
+    symbols_in_code: Optional[bool] = None
+    blocks_repaired: Optional[int] = None
+    symbols_verified: Optional[bool] = None
+    verification: Optional[str] = None
+
     # Intent-specific payloads (at most one is non-None).
     enrollment: Optional[EnrollmentRecord] = None
     recovery_phrase: Optional[List[str]] = None
@@ -171,6 +183,53 @@ def _load_image(img: Union[ImageInput, str, Path]) -> Image.Image:
         return Image.open(img)
     # numpy array path is handled directly by autodetect_cube
     return img  # type: ignore[return-value]
+
+
+#: Intents that read a **public** card. Such a card is outside the code C by
+#: construction (Theorem 2), so its membership says nothing about read quality.
+_PUBLIC_CARD_INTENTS = frozenset({
+    Intent.ENROLL, Intent.RECOVER, Intent.VERIFY, Intent.UNLOCK,
+})
+
+
+def _record_read_integrity(symbols: List[int], ctx: ScanContext,
+                           result: ScanResult) -> None:
+    """Say plainly whether the 91 symbols were read or repaired.
+
+    The Theorem-2 membership test does double duty. It is what tells a private
+    inscription (in the code C) from a public card (not in C) — and for a
+    private one it is also the only integrity signal available: a read that is
+    already a codeword needed no correction, so nothing was inferred.
+
+    A public card is *expected* to fall outside C, so its membership carries no
+    integrity information at all. Saying so is the point: the check that
+    matters for a public card is the fingerprint against a registry, one layer
+    up, and this field must not be mistaken for it.
+    """
+    from .metatron.reed_solomon import blocks_out_of_code
+
+    try:
+        repaired = blocks_out_of_code(symbols)
+    except Exception:  # pragma: no cover - defensive
+        return
+    result.symbols_in_code = not repaired
+    result.blocks_repaired = len(repaired)
+
+    if ctx.intent in _PUBLIC_CARD_INTENTS:
+        result.symbols_verified = None
+        result.verification = (
+            "not applicable: a public card is not in C by construction — "
+            "verify the fingerprint against the registry")
+        return
+
+    if repaired:
+        result.symbols_verified = False
+        result.verification = (
+            f"decoded but unverified: {len(repaired)} of 7 blocks needed "
+            "correction, and nothing at this layer can audit a correction")
+    else:
+        result.symbols_verified = True
+        result.verification = "verified: the read was already a codeword"
 
 
 def _detect_and_extract(image: Union[ImageInput, str, Path],
@@ -207,6 +266,7 @@ def _detect_and_extract(image: Union[ImageInput, str, Path],
         return None
 
     result.symbols = list(symbols)
+    _record_read_integrity(symbols, ctx, result)
     try:
         result.card_fingerprint_hex = card_fingerprint(symbols).hex()
     except Exception as exc:  # pragma: no cover - defensive

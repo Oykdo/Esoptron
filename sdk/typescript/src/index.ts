@@ -415,3 +415,28 @@ export function verifyChunksOnly(
 
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// EPX-F — the artifact figure
+//
+// Re-exported so a verifier can complete EPX-F §7 in one import: verify the
+// signature, then recompute the face from the fields that signature covers.
+// ---------------------------------------------------------------------------
+
+export {
+  ASCII_RAMP,
+  CONTENT_ROWS,
+  EPOCH_ROWS,
+  FIGURE_VERSION,
+  GRID_H,
+  GRID_W,
+  LEVELS,
+  canonicalText as figureCanonicalText,
+  epochId,
+  figureDigest,
+  figureGrid,
+  figureOf,
+  figureTag,
+  renderRows as figureRenderRows,
+} from "./figure.js";
+export type { Figure } from "./figure.js";
