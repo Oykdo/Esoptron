@@ -489,12 +489,22 @@ encoder change.
 
 ### 4.1 Inputs
 
+> `vault_fp_hex` is the **card fingerprint** —
+> `card_fingerprint(encode_public(spinor))`, the single definition given in
+> `eopx.vault.identity` and already required by EPX-G §143. It changed on
+> 2026-09-09: this vector previously carried `29f96634…b3bd96a5`, produced by
+> a seed-derived hash that only the holder of the seed could ever recompute.
+> Three derivations of `vault_fp` coexisted in the tree and disagreed for the
+> same vault; a verifier cannot check an identifier it cannot derive, so the
+> scannable one won.
+
+
 ```
 code              = "ESPX-SIGMA-VAULT-6119"
 name              = "Logos Genesis #001"
 motto             = "In silentio, mirror"
 issued_at         = "2026-05-29T23:47:09Z"
-vault_fp_hex      = 29f96634edd6e6de51ccf992c9ec9f6566a301d436f41eaad577aa16b3bd96a5
+vault_fp_hex      = 74ad6428bd4df6e8bab95b0fddcc4262e759b53918a1462f3ffe773e7123f910
 seed_hex          = 955cbc7fc2832ba888e825489a11dd07e66dc00b867e509b17680563be5c9701
 sequence          = 146038
 archetype_id      = 40

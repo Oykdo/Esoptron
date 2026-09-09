@@ -9,11 +9,9 @@
       object — every concurrent caller sees the latest scan from any user.
     * ``ServerConfig.spinor_hex`` / ``known_seed_hex`` are set once at boot,
       so the process is bound to a single vault.
-    * The ``/scan`` HTML route ships a deprecated mobile crypto chain that
-      diverges from the canonical Python core / PWA chain. It is OFF by
-      default and gated behind ``ESOPTRON_ENABLE_LEGACY_MOBILE_HTML=1``.
-    * ``/api/register_psnx`` and ``/api/frame`` are rate-limited but have no
-      auth and write to local files when debug dumping is enabled.
+    * ``/api/frame`` is rate-limited but has no auth, and writes diagnostic
+      images to ``out/`` when ``ESOPTRON_DEBUG_DUMP_FRAMES=1`` -- never in
+      ``private`` mode, whatever the operator asks for.
 
     For production multi-tenant deployments use :mod:`eopx.server.pwa_api`
     behind a reverse proxy + auth layer, or roll your own service that
@@ -23,10 +21,9 @@ Routes
 ------
 GET  /              Dashboard (PC). Shows the QR code with the phone URL
                     and the live decode status.
-GET  /scan          Mobile-friendly page that opens the phone's native
-                    camera and uploads each snapshot to /api/frame.
-                    DISABLED by default; set
-                    ``ESOPTRON_ENABLE_LEGACY_MOBILE_HTML=1`` to re-enable.
+GET  /scan          Redirects to the PWA (``ESOPTRON_PWA_URL``), else 410.
+                    The inline scanner that used to live here carried its own
+                    KDF chain and was removed.
 POST /api/frame     Accepts a multipart upload "frame": image bytes
                     (JPEG/PNG). Runs the full decode pipeline and stores
                     the result in shared state. Rate-limited (heavy).
@@ -42,7 +39,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
-import json
 import logging
 import os
 import re
@@ -216,7 +212,7 @@ def _decode_frame(frame_bgr: np.ndarray, cfg: ServerConfig) -> Dict[str, Any]:
     if cube_aruco is not None:
         try:
             pil = rectify_cube_via_cube_aruco(frame_bgr, cube_aruco)
-            _save_diagnostic_img(pil, "diagnostic_cube_crop.png")
+            _save_diagnostic_img(pil, cfg, "diagnostic_cube_crop.png")
             result = _try_decode_cube(pil, cfg, method="cube_aruco",
                                        n_markers=len(cube_aruco))
             if _is_success_result(result):
@@ -315,8 +311,28 @@ def _try_decode_cube(pil: Image.Image, cfg: ServerConfig,
                 "n_mismatches": n_mismatch}
 
 
-def _save_diagnostic_img(pil: Image.Image, filename: str) -> None:
-    """Save a PIL image diagnostic."""
+def _diagnostics_allowed(cfg: ServerConfig) -> bool:
+    """Whether a decoded frame may be written to ``out/`` for inspection.
+
+    Off unless ``ESOPTRON_DEBUG_DUMP_FRAMES=1``, and never in ``private`` mode
+    whatever the operator asked for. A private sheet reconstructs a 256-bit
+    seed, and the two images written here are the rectified page and the cube
+    crop -- the crop is precisely the decodable region. Writing it to a fixed,
+    shared path under ``out/`` persists the secret for anyone with read access
+    to the host and overwrites the previous scan's, so the mode check is not a
+    convenience: it is the reason the gate exists.
+
+    The upload path already refuses the same way (``api_frame``); this closes
+    the decode path, which was writing unconditionally.
+    """
+    return _DEBUG_DUMP_FRAMES and getattr(cfg, "mode", None) != "private"
+
+
+def _save_diagnostic_img(pil: Image.Image, cfg: ServerConfig,
+                         filename: str) -> None:
+    """Save a PIL image diagnostic, if diagnostics are allowed at all."""
+    if not _diagnostics_allowed(cfg):
+        return
     try:
         out = Path("out")
         out.mkdir(exist_ok=True)
@@ -326,7 +342,9 @@ def _save_diagnostic_img(pil: Image.Image, filename: str) -> None:
 
 
 def _save_diagnostic(rect_a4_bgr: np.ndarray, cfg: ServerConfig) -> None:
-    """Save the rectified A4 image for visual debugging."""
+    """Save the rectified A4 image for visual debugging, if allowed."""
+    if not _diagnostics_allowed(cfg):
+        return
     try:
         out = Path("out")
         out.mkdir(exist_ok=True)
@@ -436,90 +454,6 @@ def qr_png_base64(url: str) -> str:
 _VAULT_ID_RE = re.compile(r"^vlt_[0-9a-f]{32}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX32_RE = re.compile(r"^[0-9a-f]{32}$")
-_PRIVATE_FIELD_MARKERS = (
-    "secret", "seed", "master", "blend", "entropy", "private",
-)
-
-
-def _contains_private_field(obj: Any, path: str = "") -> Optional[str]:
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            key_l = str(key).lower()
-            if any(marker in key_l for marker in _PRIVATE_FIELD_MARKERS):
-                if key_l not in {"security"}:
-                    return f"{path}.{key}" if path else str(key)
-            found = _contains_private_field(
-                value, f"{path}.{key}" if path else str(key))
-            if found:
-                return found
-    elif isinstance(obj, list):
-        for idx, value in enumerate(obj):
-            found = _contains_private_field(value, f"{path}[{idx}]")
-            if found:
-                return found
-    return None
-
-
-def _validate_public_psnx(psnx: Dict[str, Any]) -> Optional[str]:
-    if not isinstance(psnx, dict):
-        return "payload must be a JSON object"
-    if psnx.get("format") != "psnx":
-        return "format must be psnx"
-    if psnx.get("version") != 1:
-        return "version must be 1"
-    if psnx.get("security") != "public":
-        return "security must be public"
-    vault_id = psnx.get("vault_id")
-    if not isinstance(vault_id, str) or not _VAULT_ID_RE.match(vault_id):
-        return "vault_id must match vlt_<32hex>"
-    for key in ("ceremony_fp_hex", "vault_fp_hex", "enrollment_fp_hex"):
-        value = psnx.get(key)
-        if not isinstance(value, str) or not _HEX64_RE.match(value):
-            return f"{key} must be 64 lowercase hex chars"
-    public_tag = psnx.get("public_tag_hex")
-    if not isinstance(public_tag, str) or not _HEX32_RE.match(public_tag):
-        return "public_tag_hex must be 32 lowercase hex chars"
-    private_path = _contains_private_field(psnx)
-    if private_path:
-        return f"private-looking field rejected: {private_path}"
-    return None
-
-
-def _register_public_psnx(psnx: Dict[str, Any]) -> Dict[str, Any]:
-    error = _validate_public_psnx(psnx)
-    if error:
-        return {"status": "REJECTED", "detail": error}
-
-    registry_dir = Path("out") / "registry"
-    registry_dir.mkdir(parents=True, exist_ok=True)
-
-    vault_id = psnx["vault_id"]
-    psnx_path = registry_dir / f"{vault_id}.psnx.json"
-    record = {
-        "registered_at": time.time(),
-        "vault_id": vault_id,
-        "ceremony_fp_hex": psnx["ceremony_fp_hex"],
-        "vault_fp_hex": psnx["vault_fp_hex"],
-        "enrollment_fp_hex": psnx["enrollment_fp_hex"],
-        "public_tag_hex": psnx["public_tag_hex"],
-        "psnx_sha256_hex": hashlib.sha256(
-            json.dumps(psnx, sort_keys=True).encode("utf-8")).hexdigest(),
-    }
-
-    psnx_path.write_text(
-        json.dumps(psnx, indent=2, sort_keys=True), encoding="utf-8")
-    with (registry_dir / "vault_registry.jsonl").open(
-            "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, sort_keys=True) + "\n")
-
-    return {"status": "REGISTERED", **record,
-            "path": str(psnx_path).replace("\\", "/")}
-
-
-# ---------------------------------------------------------------------------
-# HTML templates (inlined to keep the prototype single-file)
-# ---------------------------------------------------------------------------
-
 DASHBOARD_HTML = r"""
 <!doctype html><html><head><meta charset="utf-8">
 <title>Esoptron live scan (PC dashboard)</title>
@@ -583,398 +517,6 @@ setInterval(poll, 800); poll();
 </div></body></html>
 """
 
-SCAN_HTML = r"""
-<!doctype html><html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Esoptron scan</title>
-<style>
- *{box-sizing:border-box}
- body { font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-        background:#101018; color:#e8e8ee; margin:0; padding:16px; }
- h1 { font-weight:400; font-size:22px; margin:8px 0 18px; }
- .card { background:#1c1c28; border-radius:14px; padding:16px;
-         margin-bottom:14px; }
- button, label.btn {
-   display:block; width:100%; padding:18px; border:none;
-   border-radius:14px; background:#3060ff; color:#fff;
-   font-size:20px; font-weight:600; text-align:center;
- }
- .btn-alt { background:#2a2a3a; margin-top:10px; }
- input[type=file] { display:none; }
- #preview { width:100%; border-radius:10px; margin-top:12px; display:none;}
- .row { display:flex; justify-content:space-between; margin:5px 0; }
- .k { color:#9be; }
- .v { color:#fff; font-family: Menlo, Consolas, monospace; font-size:13px;
-      word-break:break-all; text-align:right; max-width:60%; }
- .pill { padding:4px 10px; border-radius:99px; font-weight:700; }
- .ok   { background:#0d3; color:#001; }
- .warn { background:#f93; color:#101; }
- .err  { background:#e34; color:#fff; }
- .small { color:#b8b8c8; font-size:13px; line-height:1.35; }
- .secret { background:#12121b; border:1px solid #34344a; border-radius:10px;
-           color:#fff; font-family:Menlo,Consolas,monospace; padding:10px;
-           word-break:break-all; margin-top:8px; }
- input[type=password] { width:100%; padding:14px; border-radius:10px;
-                        border:1px solid #34344a; background:#101018;
-                        color:#fff; margin:10px 0; font-size:16px; }
-</style></head><body>
-<h1>Esoptron — phone scan ({{ mode }})</h1>
-
-<div class="card">
-  <button id="camBtn" class="btn">📷 Ouvrir la caméra</button>
-  <video id="video" style="display:none;width:100%;border-radius:10px" playsinline></video>
-  <canvas id="canvas" style="display:none"></canvas>
-  <button id="snapBtn" class="btn btn-alt" style="display:none">📸 Capturer</button>
-  <form id="form" method="post" action="/api/frame" enctype="multipart/form-data" style="display:none">
-    <label class="btn" for="file">📷 Capturer depuis la galerie</label>
-    <input id="file" name="frame" type="file" accept="image/*" capture="environment">
-  </form>
-  <img id="preview" alt="">
-</div>
-
-<div class="card" id="result">
-  <i>Appuie sur "Ouvrir la caméra" puis pointe vers la feuille et capture.</i>
-</div>
-
-<script>
-const result = document.getElementById('result');
-const preview = document.getElementById('preview');
-const camBtn = document.getElementById('camBtn');
-const snapBtn = document.getElementById('snapBtn');
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const form = document.getElementById('form');
-const fileEl = document.getElementById('file');
-
-// --- Camera stream method (full resolution) ---
-let stream = null;
-camBtn.onclick = async () => {
-  try {
-    // Request high-resolution back camera
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment',
-               width: { ideal: 4032 },
-               height: { ideal: 3024 } }
-    });
-    video.srcObject = stream;
-    video.style.display = 'block';
-    snapBtn.style.display = 'block';
-    camBtn.textContent = '📷 Caméra active';
-    camBtn.disabled = true;
-    await video.play();
-  } catch(e) {
-    // Fallback to file input
-    result.innerHTML = '<span class="warn pill">Caméra non disponible</span> Utilise le bouton galerie ci-dessous.';
-    form.style.display = 'block';
-    camBtn.style.display = 'none';
-  }
-};
-
-snapBtn.onclick = () => {
-  if (!video.videoWidth) return;
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  preview.src = canvas.toDataURL('image/jpeg', 0.92);
-  preview.style.display = 'block';
-
-  result.innerHTML = '<i>analyzing... (ArUco + decode)</i>';
-
-  // Send as blob for full resolution
-  canvas.toBlob(blob => {
-    const fd = new FormData(); fd.append('frame', blob, 'capture.jpg');
-    fetch('/api/frame', { method: 'POST', body: fd })
-      .then(r => r.json()).then(j => render(j))
-      .catch(e => { result.innerHTML = '<span class="err pill">network error</span> ' + e; });
-  }, 'image/jpeg', 0.95);
-
-  // Stop camera
-  if (stream) { stream.getTracks().forEach(t => t.stop()); }
-  video.style.display = 'none';
-  snapBtn.style.display = 'none';
-  camBtn.textContent = '📷 Ouvrir la caméra';
-  camBtn.disabled = false;
-};
-
-// --- File upload fallback ---
-fileEl.addEventListener('change', async () => {
-  if (!fileEl.files.length) return;
-  const f = fileEl.files[0];
-  const url = URL.createObjectURL(f);
-  preview.src = url; preview.style.display = 'block';
-  const tmp = new Image();
-  tmp.onload = () => {
-    if (Math.max(tmp.width, tmp.height) < 1500) {
-      result.innerHTML = '<span class="err pill">Photo trop petite!</span> Utilise le bouton "Ouvrir la caméra" pour une meilleure résolution.';
-      return;
-    }
-    result.innerHTML = '<i>analyzing...</i>';
-    const fd = new FormData(); fd.append('frame', f);
-    fetch('/api/frame', { method: 'POST', body: fd })
-      .then(r => r.json()).then(j => render(j))
-      .catch(e => { result.innerHTML = '<span class="err pill">network error</span> ' + e; });
-  };
-  tmp.src = url;
-  fileEl.value = '';
-});
-
-function utf8(s) { return new TextEncoder().encode(s); }
-function concatBytes(...arrays) {
-  let n = arrays.reduce((acc, a) => acc + a.length, 0);
-  let out = new Uint8Array(n), p = 0;
-  for (const a of arrays) { out.set(a, p); p += a.length; }
-  return out;
-}
-function hexToBytes(hex) {
-  if (hex.length % 2) throw new Error('hex length must be even');
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i*2, i*2+2), 16);
-  return out;
-}
-function bytesToHex(bytes) {
-  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
-}
-function randomBytes(n) {
-  if (!window.crypto || !crypto.getRandomValues) {
-    throw new Error('crypto.getRandomValues indisponible sur ce navigateur');
-  }
-  const out = new Uint8Array(n);
-  crypto.getRandomValues(out);
-  return out;
-}
-
-const K256 = new Uint32Array([
-  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-]);
-function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
-function sha256(bytes) {
-  const bitLen = bytes.length * 8;
-  const paddedLen = (((bytes.length + 9 + 63) >> 6) << 6);
-  const msg = new Uint8Array(paddedLen);
-  msg.set(bytes);
-  msg[bytes.length] = 0x80;
-  const hi = Math.floor(bitLen / 0x100000000);
-  const lo = bitLen >>> 0;
-  msg[paddedLen-8] = (hi >>> 24) & 255; msg[paddedLen-7] = (hi >>> 16) & 255;
-  msg[paddedLen-6] = (hi >>> 8) & 255;  msg[paddedLen-5] = hi & 255;
-  msg[paddedLen-4] = (lo >>> 24) & 255; msg[paddedLen-3] = (lo >>> 16) & 255;
-  msg[paddedLen-2] = (lo >>> 8) & 255;  msg[paddedLen-1] = lo & 255;
-  let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a,
-      h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
-  const w = new Uint32Array(64);
-  for (let off = 0; off < msg.length; off += 64) {
-    for (let i=0; i<16; i++) {
-      const j = off + i*4;
-      w[i] = ((msg[j]<<24) | (msg[j+1]<<16) | (msg[j+2]<<8) | msg[j+3]) >>> 0;
-    }
-    for (let i=16; i<64; i++) {
-      const s0 = (rotr(w[i-15],7) ^ rotr(w[i-15],18) ^ (w[i-15]>>>3)) >>> 0;
-      const s1 = (rotr(w[i-2],17) ^ rotr(w[i-2],19) ^ (w[i-2]>>>10)) >>> 0;
-      w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
-    }
-    let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
-    for (let i=0; i<64; i++) {
-      const S1 = (rotr(e,6) ^ rotr(e,11) ^ rotr(e,25)) >>> 0;
-      const ch = ((e & f) ^ (~e & g)) >>> 0;
-      const temp1 = (h + S1 + ch + K256[i] + w[i]) >>> 0;
-      const S0 = (rotr(a,2) ^ rotr(a,13) ^ rotr(a,22)) >>> 0;
-      const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
-      const temp2 = (S0 + maj) >>> 0;
-      h=g; g=f; f=e; e=(d + temp1) >>> 0; d=c; c=b; b=a; a=(temp1 + temp2) >>> 0;
-    }
-    h0=(h0+a)>>>0; h1=(h1+b)>>>0; h2=(h2+c)>>>0; h3=(h3+d)>>>0;
-    h4=(h4+e)>>>0; h5=(h5+f)>>>0; h6=(h6+g)>>>0; h7=(h7+h)>>>0;
-  }
-  const hs = [h0,h1,h2,h3,h4,h5,h6,h7];
-  const out = new Uint8Array(32);
-  hs.forEach((v, i) => {
-    out[i*4] = (v>>>24)&255; out[i*4+1] = (v>>>16)&255;
-    out[i*4+2] = (v>>>8)&255; out[i*4+3] = v&255;
-  });
-  return out;
-}
-function hmacSha256(key, msg) {
-  if (key.length > 64) key = sha256(key);
-  const k = new Uint8Array(64); k.set(key);
-  const ipad = new Uint8Array(64), opad = new Uint8Array(64);
-  for (let i=0; i<64; i++) { ipad[i] = k[i] ^ 0x36; opad[i] = k[i] ^ 0x5c; }
-  return sha256(concatBytes(opad, sha256(concatBytes(ipad, msg))));
-}
-function hkdfSha256(ikm, salt, info, length) {
-  if (!salt || !salt.length) salt = new Uint8Array(32);
-  const prk = hmacSha256(salt, ikm);
-  let okm = new Uint8Array(0), t = new Uint8Array(0), c = 1;
-  while (okm.length < length) {
-    t = hmacSha256(prk, concatBytes(t, info, new Uint8Array([c++])));
-    okm = concatBytes(okm, t);
-  }
-  return okm.slice(0, length);
-}
-function downloadJson(filename, obj) {
-  const blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-}
-async function registerPublicPsnx(psnx) {
-  const r = await fetch('/api/register_psnx', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(psnx)
-  });
-  const j = await r.json();
-  if (!r.ok || j.status !== 'REGISTERED') {
-    throw new Error(j.detail || j.status || 'registration failed');
-  }
-  return j;
-}
-function recoveryCode(bytes) {
-  return bytesToHex(bytes).match(/.{1,4}/g).join(' ');
-}
-async function encryptBlendData(passphrase, payload) {
-  if (!window.crypto || !crypto.subtle) {
-    throw new Error('Chiffrement AES-GCM indisponible: utilise HTTPS ou laisse le mot de passe vide pour exporter le fichier privé non chiffré.');
-  }
-  const salt = randomBytes(16), iv = randomBytes(12);
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey(
-    {name:'PBKDF2', salt, iterations:210000, hash:'SHA-256'},
-    keyMaterial, {name:'AES-GCM', length:256}, false, ['encrypt']);
-  const ct = new Uint8Array(await crypto.subtle.encrypt(
-    {name:'AES-GCM', iv}, key, enc.encode(JSON.stringify(payload))));
-  return {
-    format: 'blend_data.encrypted',
-    version: 1,
-    cipher: 'AES-256-GCM',
-    kdf: {name:'PBKDF2-HMAC-SHA256', iterations:210000,
-          salt_hex: bytesToHex(salt)},
-    iv_hex: bytesToHex(iv),
-    ciphertext_hex: bytesToHex(ct)
-  };
-}
-async function createOnboardingPackage(scan) {
-  const out = document.getElementById('onboardOut');
-  try {
-    const passEl = document.getElementById('vaultPass');
-    const passphrase = passEl ? passEl.value : '';
-    const ceremonySeed = hexToBytes(scan.ceremony_seed_hex);
-    const ceremonyFp = hexToBytes(scan.ceremony_fp_hex);
-    const deviceEntropy = randomBytes(32);
-    const vaultSeed = hkdfSha256(
-      concatBytes(ceremonySeed, deviceEntropy), new Uint8Array(0),
-      utf8('esoptron.mobile.genesis.vault_seed.sha256.v1'), 32);
-    const masterKey = hkdfSha256(
-      vaultSeed, new Uint8Array(0),
-      utf8('esoptron.mobile.vault.master_key.sha256.v1'), 32);
-    const vaultFp = sha256(concatBytes(
-      utf8('esoptron.mobile.vault_fp.sha256.v1\n'), vaultSeed));
-    const enrollmentFp = hkdfSha256(
-      concatBytes(vaultFp, deviceEntropy), new Uint8Array(0),
-      utf8('esoptron.mobile.enrollment_fp.sha256.v1'), 32);
-    const publicTag = hkdfSha256(
-      masterKey, ceremonyFp,
-      utf8('esoptron.mobile.public_tag.sha256.v1'), 16);
-    const vaultId = 'vlt_' + bytesToHex(vaultFp.slice(0, 16));
-    const now = new Date().toISOString();
-    const psnx = {
-      format: 'psnx',
-      version: 1,
-      vault_id: vaultId,
-      created_at: now,
-      ceremony_fp_hex: scan.ceremony_fp_hex,
-      vault_fp_hex: bytesToHex(vaultFp),
-      enrollment_fp_hex: bytesToHex(enrollmentFp),
-      public_tag_hex: bytesToHex(publicTag),
-      kdf: 'HKDF-HMAC-SHA256 browser-local v1',
-      security: 'public'
-    };
-    const psnxHash = bytesToHex(sha256(utf8(JSON.stringify(psnx))));
-    const blendPlain = {
-      format: 'blend_data',
-      version: 1,
-      security: 'private',
-      vault_id: vaultId,
-      created_at: now,
-      linked_psnx_sha256_hex: psnxHash,
-      recovery: {
-        mode: 'genesis_sheet_plus_device_entropy',
-        device_entropy_recovery_code: recoveryCode(deviceEntropy)
-      },
-      secrets: {
-        device_entropy_hex: bytesToHex(deviceEntropy),
-        vault_seed_hex: bytesToHex(vaultSeed),
-        master_key_hex: bytesToHex(masterKey)
-      }
-    };
-    let blend = blendPlain, blendName = `${vaultId}.blend_data.json`;
-    if (passphrase.length) {
-      blend = await encryptBlendData(passphrase, blendPlain);
-      blend.format = 'blend_data.encrypted';
-      blend.vault_id = vaultId;
-      blend.linked_psnx_sha256_hex = psnxHash;
-      blendName = `${vaultId}.blend_data.enc.json`;
-    }
-    downloadJson(`${vaultId}.psnx.json`, psnx);
-    downloadJson(blendName, blend);
-    const registered = await registerPublicPsnx(psnx);
-    out.innerHTML =
-      `<div class="row"><span class="k">vault_id</span><span class="v">${vaultId}</span></div>` +
-      `<div class="row"><span class="k">registry</span><span class="pill ok">${registered.status}</span></div>` +
-      `<div class="row"><span class="k">vault_fp</span><span class="v">${psnx.vault_fp_hex}</span></div>` +
-      `<p class="small"><b>Code de récupération appareil:</b></p>` +
-      `<div class="secret">${blendPlain.recovery.device_entropy_recovery_code}</div>` +
-      `<p class="small">Sauvegarde ce code hors ligne. Pour récupérer: rescanner la feuille Genesis + saisir ce code.</p>`;
-  } catch (e) {
-    out.innerHTML = `<span class="err pill">onboarding error</span> ${e.message || e}`;
-  }
-}
-
-function render(j) {
-  let cls = 'warn'; const s = j.status || '?';
-  if (s === 'OK' || s === 'MATCH' || s === 'ENROLLED'
-      || s === 'GENESIS') cls = 'ok';
-  else if (s === 'NO_MARKERS') cls = 'warn';
-  else if (s === 'CROP_FAIL' || s === 'DECODE_FAIL'
-            || s === 'MISMATCH' || s === 'REJECTED'
-            || s === 'VERIFY_FAIL') cls = 'err';
-  let html = `<div class="row"><span class="k">status</span><span class="pill ${cls}">${s}</span></div>`;
-  for (const [k, v] of Object.entries(j)) {
-    if (k === 'status') continue;
-    if (k === 'ceremony_seed_hex') continue;
-    html += `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
-  }
-  if (s === 'GENESIS' && j.ceremony_seed_hex) {
-    html += `<div class="card" style="margin:14px 0 0;padding:12px;background:#161620">
-      <p class="small"><b>Onboarding local:</b> le serveur a seulement décodé la feuille.
-      Le téléphone va générer son secret, créer <code>.psnx</code> public et
-      <code>.blend_data</code> privé localement.</p>
-      <input id="vaultPass" type="password" autocomplete="new-password"
-             placeholder="Mot de passe optionnel pour chiffrer blend_data">
-      <button id="makeVaultBtn" class="btn">Créer mon vault local</button>
-      <div id="onboardOut" class="small" style="margin-top:12px"></div>
-    </div>`;
-  }
-  result.innerHTML = html;
-  if (s === 'GENESIS' && j.ceremony_seed_hex) {
-    document.getElementById('makeVaultBtn').onclick = () => createOnboardingPackage(j);
-  }
-}
-</script>
-</body></html>
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -987,9 +529,6 @@ _MAX_FRAME_BYTES = 12 * 1024 * 1024  # 12 MB / upload (hard cap)
 _MAX_IMAGE_PIXELS = 25_000_000        # 25 megapixels max
 Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
 
-_ENABLE_LEGACY_MOBILE_HTML = (
-    os.environ.get("ESOPTRON_ENABLE_LEGACY_MOBILE_HTML", "0") == "1"
-)
 _DEBUG_DUMP_FRAMES = (
     os.environ.get("ESOPTRON_DEBUG_DUMP_FRAMES", "0") == "1"
 )
@@ -1015,25 +554,33 @@ def create_app(config: ServerConfig, port: int = DEFAULT_PORT) -> Flask:
 
     @app.route("/scan")
     def scan_page():
-        # The inline mobile HTML uses a divergent SHA-256 KDF chain
-        # (`esoptron.mobile.*`) that is bytewise incompatible with the canonical
-        # Python core / PWA chain (`esoptron.vault.*`, SHA3-512). It is kept
-        # only as a developer demo and is OFF by default.
-        if not _ENABLE_LEGACY_MOBILE_HTML:
-            if _PWA_REDIRECT_URL:
-                return (
-                    f'<meta http-equiv="refresh" content="0; url={_PWA_REDIRECT_URL}">'
-                    f'<p>Redirecting to PWA at <a href="{_PWA_REDIRECT_URL}">'
-                    f'{_PWA_REDIRECT_URL}</a></p>'
-                ), 200
+        """Point the phone at the PWA. There is no second crypto chain here.
+
+        This route used to serve ~390 lines of inline HTML carrying a
+        hand-rolled SHA-256 and its own HKDF info strings
+        (``esoptron.mobile.*``), bytewise incompatible with the canonical
+        ``esoptron.vault.*`` SHA3-512 chain used by the Python core and the
+        PWA. A ``.psnx`` produced by that page described the same vault
+        differently from every other component.
+
+        It was disabled behind an environment variable, which deferred the
+        decision rather than making it: a second chain that a flag can revive
+        is a second chain. It is deleted. One canonical KDF chain per vault,
+        and the phone goes to the PWA.
+        """
+        if _PWA_REDIRECT_URL:
             return (
-                "<h1>Legacy mobile scan disabled</h1>"
-                "<p>This endpoint uses a deprecated KDF chain. "
-                "Set <code>ESOPTRON_PWA_URL</code> to redirect, or "
-                "<code>ESOPTRON_ENABLE_LEGACY_MOBILE_HTML=1</code> "
-                "to re-enable (dev only).</p>"
-            ), 410  # Gone
-        return render_template_string(SCAN_HTML, mode=config.mode)
+                f'<meta http-equiv="refresh" content="0; url={_PWA_REDIRECT_URL}">'
+                f'<p>Redirecting to the PWA at <a href="{_PWA_REDIRECT_URL}">'
+                f'{_PWA_REDIRECT_URL}</a></p>'
+            ), 200
+        return (
+            "<h1>Scan from the PWA</h1>"
+            "<p>The legacy inline scanner is gone: it shipped a KDF chain "
+            "that disagreed with the rest of the system. Set "
+            "<code>ESOPTRON_PWA_URL</code> so this endpoint redirects, or "
+            "open the PWA directly.</p>"
+        ), 410  # Gone
 
     @app.route("/api/config")
     def api_config():
@@ -1044,13 +591,24 @@ def create_app(config: ServerConfig, port: int = DEFAULT_PORT) -> Flask:
     @app.route("/api/register_psnx", methods=["POST"])
     @_rate_limit("default")
     def api_register_psnx():
-        if not _ENABLE_LEGACY_MOBILE_HTML:
-            return jsonify({"status": "DISABLED",
-                            "detail": "legacy mobile flow disabled"}), 410
-        psnx = request.get_json(silent=True)
-        result = _register_public_psnx(psnx)
-        status_code = 200 if result.get("status") == "REGISTERED" else 400
-        return jsonify(result), status_code
+        """Gone with the legacy mobile flow that was its only client.
+
+        This wrote caller-supplied JSON to an append-only registry under
+        ``out/`` with no authentication and no quota (audit 2026-05-28, P1-7).
+        Its only client was the inline ``/scan`` page, which shipped a KDF
+        chain that disagreed with the rest of the system and has been removed.
+        An unauthenticated write endpoint with no client is worse than no
+        endpoint, so it answers 410 rather than lingering.
+
+        If a public registry is wanted again it should come back
+        authenticated, as the audit recommended.
+        """
+        return jsonify({
+            "status": "GONE",
+            "detail": "the public psnx registry was removed; it was "
+                      "unauthenticated and served only the deleted legacy "
+                      "mobile flow",
+        }), 410
 
     @app.route("/api/status")
     def api_status():

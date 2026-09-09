@@ -37,7 +37,11 @@ jobs:
       - name: Spec manifest verify
         run: python tools/verify_spec.py --all
       - name: Run tests
-        run: python -m pytest -q
+        # Coverage is reported, not gated. A threshold on a number that moves
+        # with every new module turns a useful signal into a chore; the number
+        # is here so a drop is visible in the log where someone reads it.
+        # Baseline at the time this was added: 84% over 7110 statements.
+        run: python -m pytest -q --cov=src/eopx --cov-report=term:skip-covered
 
   typescript:
     name: typescript sdk

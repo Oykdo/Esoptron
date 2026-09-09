@@ -34,9 +34,16 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from .format.keys import EopxKey
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .format.keys import EopxKey
+
+# Deferred, like eopx.egg_token: the 88 Genesis positions are derived from a
+# public Bitcoin block hash and must be recomputable by anyone
+# (docs/GENESIS_COMMITMENT.md). Only the seal is signed, so only the seal
+# needs the post-quantum stack. Importing it here also made every consumer
+# of eopx.collection -- the PWA's /codex endpoint among them -- depend on it.
 
 SCHEMA_VERSION = 1
 TOTAL_GENESIS = 88
@@ -512,7 +519,7 @@ def mint_genesis_seal(*,
                        btc_block_hash: bytes,
                        btc_block_height: int,
                        positions: List[int],
-                       deployment_key: EopxKey,
+                       deployment_key: "EopxKey",
                        inscription: Optional[Inscription] = None,
                        ) -> GenesisSeal:
     """Produce a verifiable Genesis seal for a Genesis vault.
@@ -591,6 +598,8 @@ def verify_genesis_seal(seal: GenesisSeal,
         sig = bytes.fromhex(seal.signature_hex)
     except ValueError:
         return False
+    from .format.keys import EopxKey
+
     verifier = EopxKey(dilithium_pk=deployment_pk, kyber_pk=b"")
     return verifier.verify(msg, sig)
 

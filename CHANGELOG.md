@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **CI reports test coverage.** Measured for the first time: **84%** over 7110
+  statements. Reported, not gated — a threshold on a number that moves with
+  every new module turns a signal into a chore, so the figure is in the log
+  where a drop is visible. The measurement immediately paid for itself:
+  `metatron/local_rectify.py` came back at 0%, and the reason is not a missing
+  test but that **nothing imports it** — it is an unreferenced duplicate of the
+  live rectifier in `metatron/aruco.py`, 92 statements looking like part of the
+  scan pipeline (recorded as N-10 in the audit).
 * **EPX-F ports, TypeScript SDK and PWA (`sdk/typescript/src/figure.ts`,
   `pwa/src/lib/artifactFigure.ts`, `pwa/src/lib/figurePlate.ts`).** §8 requires
   both to reproduce §9 byte for byte; both now do, and they share no code, so
@@ -124,6 +132,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column alignment must be exact.
 
 ### Fixed
+
+* **The legacy mobile crypto chain is deleted, not disabled (audit P0-2).**
+  `server/app.py` carried ~390 lines of inline HTML with a hand-rolled SHA-256
+  and its own HKDF info strings (`esoptron.mobile.*`), bytewise incompatible
+  with the canonical `esoptron.vault.*` SHA3-512 chain: a `.psnx` from that
+  page described the same vault differently from every other component. It had
+  been put behind `ESOPTRON_ENABLE_LEGACY_MOBILE_HTML`, which defers the
+  decision rather than making it. `/scan` now redirects to the PWA or answers
+  410, and a test asserts the info strings are absent from the module source —
+  so re-adding the page fails a test, not a review.
+* **`/api/register_psnx` is gone with it (audit P1-7).** It appended
+  caller-supplied JSON to a registry under `out/` with no auth and no quota,
+  and its only client was the page above. An unauthenticated write endpoint
+  with no client is worse than no endpoint.
+* **Diagnostic image dumps are gated (audit P0-4 residual).** The reported
+  `out/last_upload.jpg` had been fixed, but the decode path still wrote the
+  rectified A4 and the cube crop on every call, and `_save_diagnostic` took
+  `cfg` without consulting `cfg.mode`. Both now go through
+  `_diagnostics_allowed()`: off unless `ESOPTRON_DEBUG_DUMP_FRAMES=1`, and
+  never in `private` mode. The cube crop is the decodable region of a sheet
+  that reconstructs a 256-bit seed.
+* **The deployment key's temp file is created restricted.** `_persist` wrote it
+  at the process umask and called `restrict_secret_file` only after `replace`,
+  leaving the Dilithium and Kyber secret keys at 0644 on a typical POSIX host
+  for the duration of the write. It is now `os.open(..., 0o600)`, with
+  `restrict_secret_file` kept as the cross-platform backstop.
+* **`relic_vault_fp` renamed to `relic_seal_seed`, value unchanged.** It was a
+  fourth thing named after a vault fingerprint while identifying no vault — it
+  only selects the revealed hexagram. The derivation is byte-identical (twelve
+  relics are minted on the live anchor and their seals come from it) and a test
+  pins every value across the rename.
+
+* **The `.eopx` wire format no longer takes its parameters from the
+  dependency (`eopx.format.keys`).** The six ML-DSA-87 / ML-KEM-1024 sizes were
+  read off `pqcrypto` at import time, and `eopx_format` validates a file
+  against them — `pack` rejects a public key that is not
+  `SIG_PUBLIC_KEY_SIZE` bytes, `verify` rejects a signature that is not
+  `SIG_SIGNATURE_SIZE`. So the admissibility rules of a **frozen** format moved
+  with whatever the installed library defined: a backend rebound to another
+  parameter set would have been followed rather than refused. The sizes are now
+  pinned to FIPS 204 / FIPS 203 literals and the backend is checked against
+  them, once, on first use.
+
+  The same change completes the audit's P2-2 recommendation (2026-05-28): the
+  import is deferred, so the pure-Python half of the package — Shamir,
+  `secure_bytes`, the Metatron field — is importable without the post-quantum
+  stack. The missing-dependency error keeps its exact wording; it simply
+  arrives at the first key operation. The check also names the
+  `pqcrypto>=1.0` API break (`generate_keypair()` → `keygen()`) instead of
+  letting it surface as an `AttributeError` from inside a key operation.
+
+* **The license-boundary guard no longer imports the tree it audits.**
+  `tools/license_boundary.py` is a static AST scan that executes no code from
+  `eopx` — except that its lock header drew a randomart sigil via
+  `eopx.collection.sigil`, and reaching that module through the package first
+  ran `collection/__init__` → `genesis_token` → `format.keys` → `pqcrypto`. A
+  boundary guard whose result depends on the auditee being importable is not a
+  guard. `sigil.py` imports nothing but `hashlib`, so the tool now loads that
+  one file by path; the lock is byte-identical and the guard runs anywhere.
+* **`eopx.genesis_token` derives positions without the signing stack.** Same
+  deferral as `egg_token`: the 88 Genesis positions come from a public Bitcoin
+  block hash and `GENESIS_COMMITMENT.md` promises anyone can recompute them,
+  but the module-level `EopxKey` import made every consumer of
+  `eopx.collection` — the PWA's `/codex` endpoint included — require
+  `pqcrypto`. Only the seal is signed, so only the seal needs it.
+
+* **`vault_fp` has one definition again (`eopx.vault.identity`).** Three
+  derivations had grown up in the tree and disagreed for the same vault:
+  `card_fingerprint(card)` (`vault/enroll`, `vault/genesis`, `collection`),
+  `sha3_256("esoptron.vault_fp.v1|" + seed)` (`scripts/make_invitation.py`) and
+  `sha3_256("epx-h.badge.vault_fp.v1" + spinor)` (`scripts/eopx_badge.py`) —
+  `74ad6428…`, `29f96634…` and `bb212913…` for one and the same vault. Three
+  answers to "which vault is this" is the same as none, and everything keyed by
+  `vault_fp` silently depended on which call site the caller came through: the
+  anchor's `vault_anchors` index, the EPX-H seal geometry, and
+  `egg_token.founder_egg`, which *draws a golden egg* from it.
+
+  The card fingerprint wins because it is the only one a **scan** can produce,
+  and EPX-G §143 already required it. The seed-derived variant was worse than
+  redundant: the seed is secret, so a verifier could never recompute it — an
+  identifier nobody but the holder can check is not an identifier.
+  `require_vault_fingerprint()` now rejects a truncated or hex-string
+  fingerprint at the boundaries that consume one, because 16 bytes reaching a
+  KDF yields a stable, plausible, wrong answer instead of an error.
+
+  EPX-2 §4.1's test vector carried the seed-derived value, so a port
+  reproducing the spec byte for byte would have disagreed with the
+  implementation; it is corrected to `74ad6428…` and the spec re-recorded.
+  `tests/test_vault_identity.py` pins the definition and greps for the
+  abandoned domain strings — a fourth derivation would arrive the way the last
+  two did, quietly, in a script.
 
 * **`eopx.egg_token` no longer needs the post-quantum stack to derive a
   clutch.** `EopxKey` was imported at module level but is used only to mint and
