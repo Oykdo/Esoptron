@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+* **EPX-F — the artifact figure (`eopx.artifact_figure`).** `F` maps a `.eopx`
+  to a 16×8 grid of 4-bit levels, derived by HKDF-SHA3-512 from the
+  **pre-image** half of the signed manifest — `merkle_root` and
+  `dilithium_pk_fp` — so it can be recomputed from the file by anyone.
+  `payload_hash` and `image_sha3_512` are inadmissible inputs: both are
+  downstream of the pixels the figure is drawn into, which would make the
+  derivation a fixed point with no solution. Because the inputs sit inside
+  `canonical_payload()` and the drawing reaches it through `image_sha3_512`,
+  the existing ML-DSA-87 signature already covers both ends — no new primitive,
+  no new trust root. Two bands: a **content band** (rows 0–5, `merkle_root`
+  only) that an artifact keeps for life, and an **epoch band** (rows 6–7) that
+  moves when the issuing key rotates, so a rotation is legible without turning
+  a printed badge into a stranger. Glyphs are presentation — `figure_digest`
+  covers the levels, so a Unicode ramp is a free substitution. Frozen at v1
+  with normative test vectors (`docs/specs/EPX-F_artifact_figure.md` §9,
+  `tests/test_artifact_figure.py`); brand only, never security (POSITIONING).
+
 ### Fixed
 
 * **`pqcrypto` capped below 1.0.** Upstream 1.0.0 renamed
