@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **EPX-F ports, TypeScript SDK and PWA (`sdk/typescript/src/figure.ts`,
+  `pwa/src/lib/artifactFigure.ts`, `pwa/src/lib/figurePlate.ts`).** §8 requires
+  both to reproduce §9 byte for byte; both now do, and they share no code, so
+  each is checked against the specification text rather than against the other
+  — a test comparing the two ports would pass just as happily if both had
+  drifted the same way. The presentation half is pinned against vectors from
+  `scripts/gen_figure_vectors.py`, which keeps EPX-F's stdlib-plus-HKDF
+  dependency surface so the vectors regenerate on any machine. Two defects the
+  parity vectors caught: CPython's `str.center` puts the odd padding column on
+  the **left** when margin and width are both odd, which a naive port gets
+  wrong on exactly the caption widths a plate uses; and the SDK's test file was
+  being compiled into `dist/` and would have shipped to npm.
+* **The EPX-F face on paper, drawn in EPX-R runes (`eopx.figure_render`,
+  `eopx.metatron.runes`).** One rune carries one cell: EPX-F froze four bits
+  per cell and EPX-R chose sixteen glyph states for the same reason — four bits
+  is what a camera separates reliably — so the mapping is one to one. The plate
+  is a *presentation*, not a channel: no fiducials, no timing track, no RS,
+  nothing on it to scan, because furniture that made it look scannable would
+  advertise a channel that does not exist. `render_artifact_plate` takes the
+  two manifest fields rather than a ready-made grid, so a printed plate cannot
+  disagree with the tag printed under it, and EPX-F §6's frozen/living rule is
+  enforced in pixels: a living plate gets a dashed frame and passing it a tag
+  raises.
+* **The "never on the cube" rule, as a check instead of a convention
+  (`print_sheet.reserved_regions` / `assert_clear`).** Everything that is read
+  — the cube, the four ArUco, the chromatic scan grid — is listed with a quiet
+  margin, and a placement that touches any of it is refused at render time. The
+  16-rune alphabet moved out of `scripts/rune_channel.py` into the package for
+  the same reason: a confusion matrix describes the alphabet it measured, so
+  the study and the shipped glyphs must be one object. Pinned by the strict
+  property rather than a proximity argument — adding a plate leaves the cube's
+  pixels byte-identical (`tests/test_figure_render.py`), and a decode envelope
+  cannot move if the pixels do not. Re-measured after the change: perspective
+  2.25, blur 4 px, JPEG q10, illumination ±50%, σ 96, unchanged on every axis.
 * **A measured decode envelope for the camera path (`eopx.metatron.degrade`,
   `scripts/detect_envelope.py`).** The number that decides a scan is not the
   global symbol error rate but the **worst interleaved block**: RS(13,10) ×7
@@ -90,6 +124,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column alignment must be exact.
 
 ### Fixed
+
+* **`eopx.egg_token` no longer needs the post-quantum stack to derive a
+  clutch.** `EopxKey` was imported at module level but is used only to mint and
+  verify an `EggSeal`, so recomputing a public distribution required
+  `pqcrypto`. `docs/GENESIS_COMMITMENT.md` promises anyone can recompute every
+  position from the block hash alone; requiring the signing stack to *read* it
+  had that backwards. The import is deferred to the two sealing functions.
+
+* **`tools/sign_spec.py` and `tools/verify_spec.py` work again without the
+  post-quantum stack.** Both already documented a hash-only mode, but imported
+  `EopxKey` at module level, so re-recording or verifying an unsigned document
+  needed `pqcrypto` — unavailable on Windows. The import is now deferred to the
+  signing and signature-verification paths that actually use it.
 
 * **`pqcrypto` capped below 1.0.** Upstream 1.0.0 renamed
   `pqcrypto.sign.ml_dsa_87.generate_keypair()` to `keygen()`, so a fresh

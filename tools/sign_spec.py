@@ -52,7 +52,6 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import hashlib
-import json
 import sys
 import unicodedata
 from pathlib import Path
@@ -61,7 +60,6 @@ from typing import Dict, List, Optional
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from eopx.format.keys import EopxKey  # noqa: E402
 
 
 MANIFEST = ROOT / "SPECS.SHA3-256"
@@ -166,6 +164,8 @@ def _write_binary_sig(path: Path, label: str, signature: bytes) -> Path:
 
 def _sign_with(key: Path, digest: bytes) -> tuple[str, bytes]:
     """Load a secret key and sign ``digest`` -> (pk-fingerprint-hex, sig)."""
+    from eopx.format.keys import EopxKey  # deferred: hash-only needs no PQ stack
+
     deployment = EopxKey.load(key)
     if not deployment.has_secrets:
         raise SystemExit(f"key file has no secret material: {key}")

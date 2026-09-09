@@ -26,7 +26,6 @@ from typing import Dict, List
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from eopx.format.keys import EopxKey  # noqa: E402
 
 # Re-use the canonical normalisation from sign_spec.
 sys.path.insert(0, str(ROOT / "tools"))
@@ -39,6 +38,7 @@ MANIFEST = ROOT / "SPECS.SHA3-256"
 def _resolve_pk(pk_hex: str | None, pk_file: Path | None) -> bytes | None:
     """Resolve a Dilithium public key from raw hex or a key/pub JSON file."""
     if pk_file is not None:
+        from eopx.format.keys import EopxKey  # deferred: hash-only needs no PQ stack
         return EopxKey.load(pk_file).dilithium_pk
     if pk_hex:
         return bytes.fromhex(pk_hex)
@@ -79,6 +79,8 @@ def _verify_sig(kind: str, sig_field: str, fp_field: str,
             f"{kind}: pk fingerprint mismatch "
             f"(expected {fp_expected[:16]}…, key is {fp_actual[:16]}…)"
         )
+    from eopx.format.keys import EopxKey  # deferred: hash-only needs no PQ stack
+
     verifier = EopxKey(dilithium_pk=pk, kyber_pk=b"")
     if not verifier.verify(digest, signature):
         return False, f"{kind}: Dilithium-5 signature does not verify"

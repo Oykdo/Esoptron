@@ -30,10 +30,19 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from .format.keys import EopxKey
 from .metatron.field import hkdf_sha3_256
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .format.keys import EopxKey
+
+# ``EopxKey`` is imported lazily by the two sealing functions below. The clutch
+# itself — positions, tiers, the founder draw — is public hashing over the
+# committed block (docs/GENESIS_COMMITMENT.md), and anyone must be able to
+# recompute it. Requiring the post-quantum signing stack to *read* a
+# distribution that is meant to be publicly verifiable would be backwards; the
+# stack is needed to *sign* a seal, and only there.
 
 SCHEMA_VERSION = 1
 
@@ -298,7 +307,8 @@ def _egg_seal_message(*, egg: GoldenEgg, vault_fp: bytes,
 
 def mint_egg_seal(*, egg: GoldenEgg, vault_fp: bytes,
                   btc_block_hash: bytes, btc_block_height: int,
-                  eggs: List[GoldenEgg], deployment_key: EopxKey) -> EggSeal:
+                  eggs: List[GoldenEgg],
+                  deployment_key: "EopxKey") -> EggSeal:
     """Seal a golden egg to the winning vault (Dilithium-signed, immutable).
 
     Raises ``ValueError`` if ``egg`` is not part of the published clutch.
@@ -340,6 +350,8 @@ def verify_egg_seal(seal: EggSeal, *, deployment_pk: bytes,
         sig = bytes.fromhex(seal.signature_hex)
     except ValueError:
         return False
+    from .format.keys import EopxKey
+
     return EopxKey(dilithium_pk=deployment_pk, kyber_pk=b"").verify(msg, sig)
 
 
