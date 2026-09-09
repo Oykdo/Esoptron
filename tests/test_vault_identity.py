@@ -192,3 +192,100 @@ def test_relic_seal_seed_keeps_its_value_across_the_rename():
     # And it is emphatically not the vault fingerprint of anything.
     first = CODEX[0]
     assert relic_seal_seed(first) != vault_fingerprint(first.spinor_seed())
+
+
+# --------------------------------------------------------------------------- #
+# Domain-separation strings: the most permanent bytes in the repository
+# --------------------------------------------------------------------------- #
+#
+# EPX-F §8: FIGURE_VERSION is baked into INFO_CONTENT / INFO_EPOCH, and "v1
+# must keep producing v1 grids forever", because a printed badge outlives the
+# software that made it. A domain string is therefore frozen by objects that
+# have already left the building -- there is no way to withdraw one.
+#
+# docs/research_notes/yuga_lexicon_analysis.md §3.2 once licensed choosing
+# these strings from a decorative corpus on the grounds that the KDF does not
+# care what the bytes say. True, and beside the point: the cost is not to
+# security but to mutability. eopx.egg_token shows what it costs -- its tier
+# names reached _egg_hash() and tiers_commitment_hex(), so "Lunar" now sits
+# inside an ML-DSA-87-signed digest and cannot be renamed.
+
+def _bytes_literals():
+    """(path, lineno, value) for every bytes literal under src/eopx."""
+    import ast
+
+    for path in sorted((ROOT / "src" / "eopx").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
+                yield path.relative_to(ROOT), node.lineno, node.value
+
+
+def _encoded_str_literals():
+    """(path, lineno, value) for every ``"...".encode(...)`` under src/eopx.
+
+    Scanning bytes literals for non-ASCII would be vacuous: Python's parser
+    already rejects ``b"kṛta"`` outright ("bytes can only contain ASCII
+    literal characters"). The only way non-ASCII reaches a KDF is through a
+    str literal that is encoded, so that is what this looks at.
+    """
+    import ast
+
+    for path in sorted((ROOT / "src" / "eopx").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "encode"
+                    and isinstance(node.func.value, ast.Constant)
+                    and isinstance(node.func.value.value, str)):
+                yield (path.relative_to(ROOT), node.lineno,
+                       node.func.value.value)
+
+
+def test_no_encoded_string_carries_non_ascii():
+    """Non-ASCII reaching a derivation is a silent interop bug, not a style one.
+
+    ``tools/sign_spec.py`` had to add NFC normalisation because byte-identity
+    of prose is fragile. ``hkdf_sha3_512(info=...)`` has no such step: a source
+    file re-saved in NFD would change the derivation, and no test vector would
+    catch it because the vectors are regenerated from that same file.
+    Transliterated Sanskrit -- Kṛta, Dvāpara, sandhyā -- is the worst case.
+    """
+    offenders = [
+        f"{rel}:{lineno} {text!r}"
+        for rel, lineno, text in _encoded_str_literals()
+        if not text.isascii()
+    ]
+    assert not offenders, (
+        "non-ASCII text is encoded to bytes here and may reach a KDF, which "
+        f"cannot normalise it: {offenders}"
+    )
+
+
+def test_no_decorative_corpus_reaches_a_domain_string():
+    """The specific move §3.2 licensed, caught in the shape it would take.
+
+    A display lexicon is welcome in a caption and forbidden in a derivation.
+    The word list is deliberately wide, including the terms a contributor
+    would reach for while reading the note -- the two vault_fp derivations
+    this file already guards against arrived exactly that way, retyped into a
+    script rather than imported.
+    """
+    corpus = (
+        "yuga", "kalpa", "manvantara", "mahayuga", "chaturyuga",
+        "sandhya", "krita", "satya", "treta", "dvapara", "kali",
+    )
+    candidates = [(rel, ln, v.decode("ascii", "replace"))
+                  for rel, ln, v in _bytes_literals()]
+    candidates += list(_encoded_str_literals())
+    offenders = []
+    for rel, lineno, text in candidates:
+        for word in corpus:
+            if word in text.lower():
+                offenders.append(f"{rel}:{lineno} contains {word!r}")
+    assert not offenders, (
+        "a decorative lexicon reached a bytes literal. It is display-only "
+        "(yuga_lexicon_analysis.md §5); a domain string is frozen for the "
+        f"life of the printed parc: {offenders}"
+    )
