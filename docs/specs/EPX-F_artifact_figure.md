@@ -7,7 +7,7 @@
 | Version         | 1                                                         |
 | Date            | 2026-09-09                                                |
 | Author          | Jérémy ZGONEC                                             |
-| Layer           | `eopx.artifact_figure` (derivation), `eopx.epoch_chain` (§5), `eopx.figure_plate` (§6) |
+| Layer           | `eopx.artifact_figure` (derivation), `eopx.epoch_chain` (§5), `eopx.figure_plate` / `eopx.figure_render` (§6) |
 | Wire compat     | Additive — reads the manifest, modifies nothing           |
 | Dependencies    | stdlib + `eopx.metatron.field.hkdf_sha3_512`; §5 also uses `eopx.format.keys` |
 
@@ -260,6 +260,31 @@ the face gains texture rather than a flat gradient. It is perceptual, not
 metric, and several of its code points are East-Asian *ambiguous* width: when
 column alignment must be exact — a printed table, a fixed-width report — use
 `ASCII_RAMP` and an ASCII frame.
+
+### 6.1 On paper: the runic plate
+
+`eopx.figure_render` draws the same grid for print, taking its glyphs from the
+EPX-R rune alphabet (`eopx.metatron.runes`, EPX-R §3). One rune carries one
+cell: EPX-F froze four bits per cell and EPX-R chose sixteen glyph states for
+the same underlying reason — four bits is what a camera separates reliably — so
+the mapping is one to one and needs no re-packing.
+
+It is a **presentation**, not a channel. The plate carries no fiducials, no
+timing track, no format block and no Reed–Solomon; there is nothing on it to
+scan, and adding the furniture that would make it scannable would advertise a
+channel that does not exist. Verification remains §7: recompute from the
+`.eopx`, compare the tag.
+
+**Placement is normative in one respect: never on the cube.** Ink near the 91
+carriers or near the ArUco fiducials is paid for out of the measured decode
+envelope (`scripts/detect_envelope.py`), and geometry is already the binding
+axis. EPX-H answered this with an exclusion mask; EPX-F answers it by staying
+off the cube entirely. `scripts/print_sheet.py` encodes the rule as a check
+rather than a convention: `reserved_regions()` lists everything that is read —
+the cube, the four fiducials, the chromatic scan grid, each inflated by a quiet
+margin — and `assert_clear()` refuses the placement at render time. The
+property a test pins is the strict one: adding a plate leaves the cube's pixels
+byte-identical, and a decode envelope cannot move if the pixels do not.
 
 ## 7. Verification
 

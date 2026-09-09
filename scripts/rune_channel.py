@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """EPX-R WP-1 / M2 — rune set + confusion matrix (the rune channel study).
 
-Self-contained (numpy only). Defines 16 distinct rune glyphs, a capture
-degradation model, a nearest-prototype classifier with a confidence margin,
-and measures the 16x16 confusion matrix -> per-cell error rate p_cell(level),
+Needs numpy and the package's rune alphabet (eopx.metatron.runes). Takes its
+16 glyphs from there, then defines a capture degradation model, a
+nearest-prototype classifier with a confidence margin, and measures the
+16x16 confusion matrix -> per-cell error rate p_cell(level),
 compared to the code thresholds p*:
 
     errors-only          p_cell <= ~8.4 %    (2t <= d-1, t<=43, n=255)
@@ -26,32 +27,12 @@ S = 28  # cell raster size (px)
 # --------------------------------------------------------------------------- #
 # 16 rune glyphs as stroke lists in [0,1]^2 (y down). Futhark-inspired, chosen
 # for distinct stroke topology. Index = the F_16 symbol it carries.
+#
+# The table itself now lives in the package (eopx.metatron.runes): a confusion
+# matrix only describes the alphabet it measured, so the study and the shipped
+# glyphs must be the same object, not two copies free to drift apart.
 # --------------------------------------------------------------------------- #
-S_ = (0.5, 0.10, 0.5, 0.90)  # the vertical stave, reused
-RUNES = {
-    0:  [S_],                                                   # Isa  |
-    1:  [S_, (0.5, 0.20, 0.85, 0.35), (0.5, 0.45, 0.85, 0.60)],  # Fehu
-    2:  [(0.25, 0.16, 0.80, 0.50), (0.80, 0.50, 0.25, 0.84)],     # Kenaz ">" (no stave, distinct from Raido)
-    3:  [(0.20, 0.10, 0.80, 0.90), S_],                          # Eihwaz
-    4:  [(0.20, 0.20, 0.80, 0.80), (0.80, 0.20, 0.20, 0.80)],    # Gebo  X
-    5:  [S_, (0.5, 0.30, 0.82, 0.50), (0.82, 0.50, 0.5, 0.70)],  # Thurisaz
-    6:  [(0.5, 0.20, 0.82, 0.50), (0.82, 0.50, 0.5, 0.80),
-         (0.5, 0.80, 0.18, 0.50), (0.18, 0.50, 0.5, 0.20)],      # Ingwaz diamond
-    7:  [S_, (0.5, 0.30, 0.82, 0.10), (0.5, 0.30, 0.18, 0.10)],  # Algiz
-    8:  [(0.82, 0.15, 0.40, 0.40), (0.40, 0.40, 0.82, 0.60),
-         (0.82, 0.60, 0.40, 0.85)],                              # Sowilo S
-    9:  [S_, (0.20, 0.50, 0.80, 0.50)],                          # plus
-    10: [S_, (0.5, 0.10, 0.82, 0.30), (0.82, 0.30, 0.5, 0.50),
-         (0.5, 0.50, 0.82, 0.90)],                               # Raido
-    11: [S_, (0.5, 0.10, 0.80, 0.25), (0.80, 0.25, 0.5, 0.40),
-         (0.5, 0.50, 0.80, 0.65), (0.80, 0.65, 0.5, 0.80)],      # Berkanan
-    12: [S_, (0.5, 0.10, 0.82, 0.32)],                           # Laguz
-    13: [S_, (0.5, 0.10, 0.80, 0.25), (0.80, 0.25, 0.5, 0.40)],  # Wunjo
-    14: [S_, (0.5, 0.10, 0.82, 0.30), (0.5, 0.10, 0.18, 0.30)],  # Tiwaz
-    15: [(0.5, 0.12, 0.74, 0.34), (0.74, 0.34, 0.5, 0.56),
-         (0.5, 0.56, 0.26, 0.34), (0.26, 0.34, 0.5, 0.12),
-         (0.5, 0.56, 0.30, 0.90), (0.5, 0.56, 0.70, 0.90)],      # Othala
-}
+from eopx.metatron.runes import RUNES  # noqa: E402
 
 
 def rasterize(segs, size=S, width=1.3, aa=0.9):
