@@ -23,6 +23,9 @@ from eopx.metatron.degrade import (
     blur,
     canonical_fiducials,
     chroma_noise,
+    fiducial_jitter,
+    fiducial_radius,
+    fiducial_shift,
     illumination,
     jpeg,
     perspective,
@@ -160,3 +163,63 @@ def test_degradation_compounds_across_axes(card):
         "the mediocre-photo case no longer compounds past the error budget — "
         "re-measure the envelope and re-pin this test")
     assert sc.worst_block <= 3, f"degradation worse than recorded: {sc.per_block}"
+
+
+# --- fiducial localisation: the term the bench used to exclude -------------
+#
+# Every axis above degrades the image and then hands the rectifier the six
+# fiducials exactly. A scanner has to find them. These two tests pin what that
+# error costs, and the answer decides where fiducials should be placed --
+# which is a live question (audit N-10, `metatron/local_rectify.py`).
+
+def test_common_mode_fiducial_error_is_cheap_but_not_free(card):
+    """A uniform mislocation slides the sampling grid; it is not absorbed.
+
+    It is tempting to expect a homography to swallow a translation. It does
+    not here, because the *destination* is the fixed canonical frame: shifting
+    every source correspondence reads every carrier off-centre by the same
+    amount. Measured envelope is 12 px on a 1024 canvas; 8 is asserted.
+    """
+    _, codeword, img, fid = card
+    sc = score(img, fiducial_shift(fid, 8.0, 0.0), codeword, canvas=CANVAS)
+    assert sc.worst_block <= 1, sc.per_block
+
+    # And it does break, so the test above is not vacuous.
+    broken = score(img, fiducial_shift(fid, 24.0, 0.0), codeword, canvas=CANVAS)
+    assert broken.worst_block > 1
+
+
+def test_differential_fiducial_error_is_an_order_of_magnitude_dearer(card):
+    """Sigma 1 px already puts draws out of budget, against 12 px of slide.
+
+    Differential error shears the fitted warp instead of translating it, and
+    the residual grows with distance from the fiducials. The requirement it
+    implies is the useful output: about **one pixel of relative accuracy over
+    a 410 px figure radius**, a quarter of a percent. That is what separates
+    fiducials read across a whole sheet from fiducials that travel with the
+    cube.
+
+    Single draws vary wildly -- one badly-placed fiducial dominates the fit --
+    so this asserts on the distribution, not on one number.
+    """
+    _, codeword, img, fid = card
+
+    def in_budget(sigma, seeds=5):
+        return sum(
+            1 for s in range(seeds)
+            if score(img, fiducial_jitter(fid, sigma, seed=s),
+                     codeword, canvas=CANVAS).worst_block <= 1
+        )
+
+    assert in_budget(0.0) == 5, "no jitter must be exact"
+    # The asymmetry is the finding: a slide of 8 px is free (test above) while
+    # a sigma of 6 px loses most draws.
+    assert in_budget(6.0) <= 2
+
+
+def test_fiducial_radius_makes_a_sigma_scale_free(card):
+    """A pixel budget is meaningless without the figure it is measured against."""
+    r = fiducial_radius(CANVAS)
+    assert 0.35 * CANVAS < r < 0.45 * CANVAS
+    # Twice the canvas, twice the radius: the ratio is what transfers.
+    assert fiducial_radius(2 * CANVAS) == pytest.approx(2 * r, rel=1e-6)

@@ -16,7 +16,7 @@ The rendering is fully deterministic given (symbols, canvas_size).
 
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import Dict, Sequence, Tuple
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -50,7 +50,22 @@ EDGE_LINE_COLOR = (200, 200, 200)
 
 # Inner ArUco marker constants (used by local_rectify.py, not currently rendered)
 INNER_ARUCO_FRAC = 0.038    # large enough for OpenCV detection at 1024 px
-INNER_ARUCO_OFFSET = 1.50   # well outside the hexagon
+#: Radial position of the six inner ArUco markers, as a multiple of the
+#: drawable radius. 1.0 sits on a hexagon vertex.
+#:
+#: It was 1.50, and at that value every marker lands outside the canvas: the
+#: drawable radius *is* the half-width of the drawable area, so 1.5x it is past
+#: the edge by half again. ``_render_inner_aruco`` ran and painted nothing
+#: visible, which is why the markers were recorded as "not currently rendered"
+#: and why ``local_rectify`` was never wired up.
+#:
+#: The window is narrow and scale-invariant. Below ~1.13 the marker overlaps the
+#: vertex's coloured ring (it would cover a carrier); above ~1.20 it runs off
+#: the canvas. 1.15 is the only round value clearing both, with ~9 px of ring
+#: clearance and ~21 px of edge margin at 1024 px. :func:`inner_aruco_centers`
+#: computes it, and ``tests/test_render_inner_aruco.py`` asserts both bounds so
+#: the constant cannot go quietly wrong again.
+INNER_ARUCO_OFFSET = 1.15
 
 
 def _project(coord: Tuple[float, float], size: int) -> Tuple[float, float]:
@@ -160,6 +175,32 @@ def render(symbols: Sequence[int],
     return img
 
 
+def inner_aruco_centers(size: int) -> Dict[int, Tuple[float, float]]:
+    """Pixel centre of each inner ArUco marker on a ``size`` px canvas.
+
+    One source of truth for a geometry three places need: the renderer that
+    paints the markers, a rectifier that expects to find them, and the test
+    that checks they land where they can be seen at all. Keyed by marker id,
+    not by vertex, because a detector reports ids.
+    """
+    center = size / 2.0
+    margin = int(size * MARGIN_FRAC)
+    radius_px = (size - 2 * margin) / 2.0
+    scale = radius_px / (3 ** 0.5)
+    target_r = INNER_ARUCO_OFFSET * (3 ** 0.5)
+
+    out: Dict[int, Tuple[float, float]] = {}
+    for vertex_idx, aruco_id in ARUCO_INNER_IDS.items():
+        vx, vy = VERTICES[vertex_idx]
+        r = (vx ** 2 + vy ** 2) ** 0.5
+        if r == 0:
+            continue
+        factor = target_r / r
+        out[aruco_id] = (center + vx * factor * scale,
+                         center - vy * factor * scale)
+    return out
+
+
 def _render_inner_aruco(img: Image.Image, size: int) -> None:
     """Render 6 small ArUco markers (IDs 20-25) outside the outer hexagon.
 
@@ -173,25 +214,7 @@ def _render_inner_aruco(img: Image.Image, size: int) -> None:
     dictionary = aruco.getPredefinedDictionary(getattr(aruco, ARUCO_DICT_NAME))
     marker_side = max(8, int(round(size * INNER_ARUCO_FRAC)))
 
-    center = size / 2.0
-    margin = int(size * MARGIN_FRAC)
-    radius_px = (size - 2 * margin) / 2.0
-    scale = radius_px / (3 ** 0.5)
-
-    for vertex_idx, aruco_id in ARUCO_INNER_IDS.items():
-        vx, vy = VERTICES[vertex_idx]
-        # Position at vertex, pushed outward radially
-        r = (vx ** 2 + vy ** 2) ** 0.5
-        if r == 0:
-            continue
-        # Push the marker center to INNER_ARUCO_OFFSET * hex_radius
-        target_r = INNER_ARUCO_OFFSET * (3 ** 0.5)  # hex radius = sqrt(3)
-        factor = target_r / r
-        mx = vx * factor
-        my = vy * factor
-        px = center + mx * scale
-        py = center - my * scale
-
+    for aruco_id, (px, py) in inner_aruco_centers(size).items():
         # Generate the ArUco marker image
         marker = aruco.generateImageMarker(
             dictionary, aruco_id, marker_side, borderBits=1
