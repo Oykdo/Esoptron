@@ -162,16 +162,50 @@ def classify_color(r: int, g: int, b: int) -> Tuple[int, float]:
     chroma = (a ** 2 + b_ ** 2) ** 0.5
     if L > 0.80 and chroma < 0.05:
         return 12, 0.50  # sentinel: near-white → erasure candidate
+    best_sym, best_d, _second_d = _classify_full(target)
+    return best_sym, best_d
+
+
+def _classify_full(target: Tuple[float, float, float]
+                   ) -> Tuple[int, float, float]:
+    """(symbol, distance to nearest, distance to second nearest), Oklab."""
     best_sym = 0
     best_d2 = float("inf")
+    second_d2 = float("inf")
     for sym, pal in enumerate(_PALETTE_OKLAB):
         d2 = (target[0] - pal[0]) ** 2 \
              + (target[1] - pal[1]) ** 2 \
              + (target[2] - pal[2]) ** 2
         if d2 < best_d2:
+            second_d2 = best_d2
             best_d2 = d2
             best_sym = sym
-    return best_sym, best_d2 ** 0.5
+        elif d2 < second_d2:
+            second_d2 = d2
+    return best_sym, best_d2 ** 0.5, second_d2 ** 0.5
+
+
+def classify_margin(r: int, g: int, b: int) -> Tuple[int, float, float]:
+    """Classify, and report how *decided* the classification was.
+
+    Returns ``(symbol, distance, margin)`` where ``margin`` is the gap between
+    the second-nearest and the nearest palette entry.
+
+    Absolute distance answers "how far is this pixel from the palette", which
+    a shadow or a warm lamp inflates for every carrier at once. The margin
+    answers "how much closer to this colour than to any other", and a
+    common-mode shift largely cancels out of a difference. A carrier far from
+    everything but plainly nearest one entry is reliable; one sitting between
+    two entries is the erasure worth spending budget on.
+
+    The near-white sentinel keeps its meaning: margin 0, i.e. maximal doubt.
+    """
+    target = srgb255_to_oklab(r, g, b)
+    L, a, b_ = target
+    if L > 0.80 and (a ** 2 + b_ ** 2) ** 0.5 < 0.05:
+        return 12, 0.50, 0.0
+    sym, best, second = _classify_full(target)
+    return sym, best, second - best
 
 
 def palette_oklab() -> List[Tuple[float, float, float]]:
