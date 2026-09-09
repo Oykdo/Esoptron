@@ -62,6 +62,14 @@ def _build():
     flask_app = Flask("eopx_artifact_anchor")
     flask_app.register_blueprint(
         create_artifact_api(ledger, key, allow_grants=False))
+
+    # Golden-egg attribution, read-only and stateless: the draw is a pure
+    # function of the committed block, and the grants are served from the
+    # signed ledger. No database, no signing key -- nothing this blueprint
+    # exposes can be written through it.
+    from eopx.server.eggs_api import create_eggs_api
+    flask_app.register_blueprint(create_eggs_api())
+
     return flask_app
 
 
