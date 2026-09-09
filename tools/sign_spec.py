@@ -27,11 +27,22 @@ chooses to sign. Use ``--all`` to refresh every doc currently in the
 manifest in one pass, or ``--scan`` to bootstrap a manifest covering
 all known signed-doc paths.
 
+A record may carry **two** independent Dilithium-5 signatures over the
+same digest: a primary ``signature`` (``signer-pk-fp``) and a
+``cosignature`` (``cosigner-pk-fp``). Pass ``--cosign-key`` to add the
+second. With ``--emit-binary-sig`` each signature is also written as a
+raw detached ``.sig`` file next to the document (``<doc>.<label>.sig``),
+a binary transcription of the hex carried in the manifest.
+
 Usage::
 
     py tools/sign_spec.py docs/specs/EPX-2_card_v2.md
     py tools/sign_spec.py docs/specs/EPX-2_card_v2.md \\
         --key ~/.esoptron/jeremy.key.json
+    py tools/sign_spec.py tools/license_boundary.lock \\
+        --key ~/.esoptron/jeremy.key.json --signer-label zgo \\
+        --cosign-key issuer.json --cosigner-label alef \\
+        --emit-binary-sig
     py tools/sign_spec.py --all
     py tools/sign_spec.py --scan
 """
@@ -83,6 +94,7 @@ KNOWN_DOCS: tuple[str, ...] = (
     "docs/research_notes/yuga_lexicon_analysis.md",
     "docs/specs/EPX-G_reclaim.md",
     "RELEASE.md",
+    "tools/license_boundary.lock",
 )
 
 
@@ -130,6 +142,7 @@ def _format(blocks: List[Dict[str, str]]) -> str:
         "spec", "hash", "bytes-raw", "bytes-normalised",
         "normalisation", "author", "timestamp",
         "signer-pk-fp", "signature",
+        "cosigner-pk-fp", "cosignature",
     )
     for blk in blocks:
         for k in keys:
@@ -139,13 +152,40 @@ def _format(blocks: List[Dict[str, str]]) -> str:
     return "\n".join(out).rstrip("\n") + "\n"
 
 
+def _write_binary_sig(path: Path, label: str, signature: bytes) -> Path:
+    """Write a raw detached Dilithium-5 signature next to ``path``.
+
+    The file is the binary transcription of the hex in the manifest:
+    ``<doc>.<label>.sig`` holding exactly ``SIGNATURE_SIZE`` bytes.
+    """
+    out = path.with_name(f"{path.name}.{label}.sig")
+    out.write_bytes(signature)
+    return out
+
+
+def _sign_with(key: Path, digest: bytes) -> tuple[str, bytes]:
+    """Load a secret key and sign ``digest`` -> (pk-fingerprint-hex, sig)."""
+    deployment = EopxKey.load(key)
+    if not deployment.has_secrets:
+        raise SystemExit(f"key file has no secret material: {key}")
+    signature = deployment.sign(digest)
+    fp = hashlib.sha3_256(deployment.dilithium_pk).hexdigest()
+    return fp, signature
+
+
 def _sign_one(path: Path, *, author: str, timestamp: str,
-              key: Optional[Path]) -> Dict[str, str]:
+              key: Optional[Path], cosign_key: Optional[Path] = None,
+              signer_label: Optional[str] = None,
+              cosigner_label: Optional[str] = None,
+              emit_binary_sig: bool = False) -> Dict[str, str]:
     if not path.is_file():
         raise SystemExit(f"document not found: {path}")
+    if cosign_key is not None and key is None:
+        raise SystemExit("--cosign-key requires a primary --key")
     raw = path.read_bytes()
     normalised = normalise_bytes(raw)
-    digest_hex = hashlib.sha3_256(normalised).hexdigest()
+    digest = hashlib.sha3_256(normalised).digest()
+    digest_hex = digest.hex()
     rel = path.resolve().relative_to(ROOT).as_posix()
     record: Dict[str, str] = {
         "spec": rel,
@@ -157,13 +197,17 @@ def _sign_one(path: Path, *, author: str, timestamp: str,
         "timestamp": timestamp,
     }
     if key is not None:
-        deployment = EopxKey.load(key)
-        if not deployment.has_secrets:
-            raise SystemExit(f"key file has no secret material: {key}")
-        signature = deployment.sign(hashlib.sha3_256(normalised).digest())
-        signer_fp = hashlib.sha3_256(deployment.dilithium_pk).hexdigest()
+        signer_fp, signature = _sign_with(key, digest)
         record["signer-pk-fp"] = f"sha3-256:{signer_fp}"
         record["signature"] = f"dilithium5:{signature.hex()}"
+        if emit_binary_sig:
+            _write_binary_sig(path, signer_label or "primary", signature)
+    if cosign_key is not None:
+        cosigner_fp, cosignature = _sign_with(cosign_key, digest)
+        record["cosigner-pk-fp"] = f"sha3-256:{cosigner_fp}"
+        record["cosignature"] = f"dilithium5:{cosignature.hex()}"
+        if emit_binary_sig:
+            _write_binary_sig(path, cosigner_label or "cosigner", cosignature)
     return record
 
 
@@ -176,7 +220,15 @@ def main() -> int:
                     default=_dt.datetime.now(_dt.timezone.utc)
                     .strftime("%Y-%m-%dT%H:%M:%SZ"))
     ap.add_argument("--key", type=Path,
-                    help="Path to JSON Dilithium-5 key.")
+                    help="Path to JSON Dilithium-5 key (primary signer).")
+    ap.add_argument("--cosign-key", type=Path,
+                    help="Path to a second JSON Dilithium-5 key (cosigner).")
+    ap.add_argument("--signer-label", default=None,
+                    help="Label for the primary signer's binary .sig file.")
+    ap.add_argument("--cosigner-label", default=None,
+                    help="Label for the cosigner's binary .sig file.")
+    ap.add_argument("--emit-binary-sig", action="store_true",
+                    help="Also write raw detached <doc>.<label>.sig files.")
     ap.add_argument("--all", action="store_true",
                     help="Refresh every entry currently in the manifest.")
     ap.add_argument("--scan", action="store_true",
@@ -206,6 +258,10 @@ def main() -> int:
     for tgt in targets:
         record = _sign_one(
             tgt, author=args.author, timestamp=args.timestamp, key=args.key,
+            cosign_key=args.cosign_key,
+            signer_label=args.signer_label,
+            cosigner_label=args.cosigner_label,
+            emit_binary_sig=args.emit_binary_sig,
         )
         replaced = False
         for i, blk in enumerate(blocks):
@@ -215,7 +271,12 @@ def main() -> int:
                 break
         if not replaced:
             blocks.append(record)
-        signed = "yes" if "signature" in record else "no"
+        if "cosignature" in record:
+            signed = "yes+cosigned"
+        elif "signature" in record:
+            signed = "yes"
+        else:
+            signed = "no"
         print(f"  + {record['spec']:<45s} {record['hash']} "
               f"raw={record['bytes-raw']} "
               f"normalised={record['bytes-normalised']} signed={signed}")
