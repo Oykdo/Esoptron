@@ -9,6 +9,12 @@ venv/
 build/
 dist/
 out/
+# Runtime state the anchor and the grant ledger write next to the checkout when
+# no explicit path is given -- a test run from the repo root is enough to
+# create it. The secret key inside is already covered by *.key.json above; this
+# keeps the rest (a CRLF-carrying ledger, which fails the encoding gate) out of
+# the tree as well.
+data/
 *.tmp
 
 # Node / TS

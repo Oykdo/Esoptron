@@ -9,9 +9,16 @@ Every measurement here reports that number.
 The degradations are deterministic given their parameters (the noise axis
 takes an explicit seed), so an envelope measured today can be compared against
 the same envelope measured after a change. They are a *model* of a photograph,
-not a photograph: real capture also brings ArUco detection error, rolling
-shutter, motion blur and print gamut. Treat the numbers as an upper bound on
-what a phone will achieve, never as a field result.
+not a photograph: real capture also brings rolling shutter, motion blur and
+print gamut. Treat the numbers as an upper bound on what a phone will achieve,
+never as a field result.
+
+Fiducial localisation error used to be excluded too — the image was degraded
+and the six fiducials were then handed to the rectifier exactly. That omission
+mattered more than the others, because locating the fiducials is precisely
+what distinguishes one rectification strategy from another, and geometry is
+the binding axis. :func:`fiducial_jitter` and :func:`fiducial_shift` measure
+it, split the way a homography treats it.
 
 Pillow + numpy only — no OpenCV — so the harness runs anywhere the package
 installs.
@@ -128,6 +135,77 @@ def chroma_noise(img: Image.Image, sigma: float, *, seed: int = 0
 
 
 # ---------------------------------------------------------------------------
+# Fiducial localisation — the term the rest of this module used to exclude
+# ---------------------------------------------------------------------------
+#
+# Every axis above degrades the *image* and then hands the rectifier the six
+# fiducial positions exactly. A real scanner does not get them: it estimates
+# them, and is wrong by some amount. That excluded term is what separates the
+# rectification strategies -- page-corner markers far from the cube against
+# fiducials that travel with it -- so a bench that omits it cannot compare
+# them, and reports an envelope no phone can reach.
+#
+# The two functions below split the error in the way the homography does,
+# which is the whole point: a four-point homography absorbs a translation
+# exactly, so only the *differential* part of a localisation error reaches the
+# carriers. Measuring the two separately turns "how well must a scanner find
+# the fiducials" into a number, instead of a worry.
+
+
+def fiducial_shift(points: Sequence[Point], dx: float, dy: float) -> List[Point]:
+    """Move every fiducial by the same vector — common-mode error.
+
+    It is tempting to expect this to be free, on the grounds that a homography
+    can translate. It is not: the *destination* is the fixed canonical frame,
+    so a uniform error in the source correspondences slides the whole sampling
+    grid across the photograph, and the carriers are read off-centre. Measured
+    on a 1024 px canvas it survives to about 12 px and collapses by 16 —
+    cheap, but not free.
+    """
+    return [(x + dx, y + dy) for x, y in points]
+
+
+def fiducial_jitter(points: Sequence[Point], sigma: float, *,
+                    seed: int = 0) -> List[Point]:
+    """Perturb each fiducial independently — differential error, in pixels.
+
+    Gaussian, isotropic, one draw per fiducial, deterministic in ``seed`` so
+    an envelope is comparable across runs. The six points no longer describe
+    one rigid figure, so the fitted warp is *sheared*, and the error it leaves
+    grows with distance from the fiducials rather than staying put.
+
+    This is roughly an order of magnitude more expensive than the common-mode
+    case: on a 1024 px canvas, sigma 1 px already puts some draws out of
+    budget, against 12 px of uniform slide. A scanner therefore has to place
+    the six fiducials to about **one pixel of relative accuracy over a 410 px
+    figure radius** — a quarter of a percent. That requirement, not the image
+    quality, is what separates fiducials seen across a whole sheet from
+    fiducials that travel with the cube.
+
+    Single draws vary wildly, because one badly-placed fiducial dominates the
+    fit. Sweep several seeds and read the distribution, never one number.
+    """
+    if sigma <= 0:
+        return list(points)
+    rng = np.random.default_rng(seed)
+    return [(x + float(rng.normal(0.0, sigma)),
+             y + float(rng.normal(0.0, sigma)))
+            for x, y in points]
+
+
+def fiducial_radius(canvas: int) -> float:
+    """Distance from the figure centre to a fiducial, in pixels.
+
+    Lets a jitter measured on one canvas be read on another: what matters to
+    the homography is the error *relative to* the figure it spans, not its
+    absolute size. Divide a sigma by this to get a scale-free number.
+    """
+    cx, cy = canvas / 2.0, canvas / 2.0
+    pts = canonical_fiducials(canvas)
+    return sum(((x - cx) ** 2 + (y - cy) ** 2) ** 0.5 for x, y in pts) / len(pts)
+
+
+# ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
 
@@ -183,6 +261,7 @@ def envelope(measure, levels: Sequence[float], *,
 
 __all__ = [
     "FIDUCIAL_VERTICES", "PERSPECTIVE_UNIT", "FILL_RGB",
+    "fiducial_shift", "fiducial_jitter", "fiducial_radius",
     "canonical_fiducials", "perspective", "blur", "jpeg", "illumination",
     "chroma_noise", "Score", "block_of", "score", "envelope",
 ]

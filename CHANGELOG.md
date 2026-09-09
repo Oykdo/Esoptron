@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **The decode envelope now measures fiducial localisation
+  (`degrade.fiducial_shift`, `degrade.fiducial_jitter`,
+  `degrade.fiducial_radius`).** Every existing axis degraded the image and then
+  handed the rectifier the six fiducials *exactly*, so the bench was blind to
+  the one term that separates rectification strategies — and geometry is the
+  binding axis. Reported in the two parts the fit treats differently:
+
+  | Fiducial error | Envelope (worst block ≤ 1) |
+  | --- | --- |
+  | common mode — the whole estimate slides | **12 px** |
+  | differential — the six points stop describing one rigid figure | **0.5 px** |
+
+  A prediction failed on the way, which is why the measurement was worth
+  making: a homography does *not* absorb a uniform mislocation, because the
+  destination is the fixed canonical frame — sliding every source
+  correspondence reads every carrier off-centre by the same amount. Cheap, not
+  free. The differential term is ~24× dearer, and single draws vary enormously
+  (at σ 2 px the worst block over five seeds ranged 0, 0, 2, 0, 13) because one
+  badly-placed fiducial dominates the fit, so the bench prints the distribution
+  rather than a mean.
+
+  The useful output is a requirement: **~1 px of relative accuracy over a 410 px
+  figure radius, a quarter of a percent.** The five original envelopes are
+  unchanged (perspective 2.25, blur 4 px, JPEG q10, illumination ±50%, σ 96).
 * **CI reports test coverage.** Measured for the first time: **84%** over 7110
   statements. Reported, not gated — a threshold on a number that moves with
   every new module turns a signal into a chore, so the figure is in the log

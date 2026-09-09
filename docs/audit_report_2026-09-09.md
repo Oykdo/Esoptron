@@ -270,19 +270,83 @@ Nothing on this list blocks publication in the way the 2026-05-28 P0s did.
 
 ## Addendum, same day — two findings from measuring coverage
 
-### N-10 — `metatron/local_rectify.py` is dead code in the scan path
+### N-10 — `metatron/local_rectify.py` is unreached, and the reason is a trade
 
-**Severity: low, but 92 statements.** Coverage reported it at **0%**, and the
-reason is not a missing test: **nothing imports it**. The only reference in the
-tree is a comment in `render.py` noting that the inner ArUco markers it needs
-are "not currently rendered", and `print_sheet.py` records that the
-cube-adjacent markers were disabled because OpenCV did not detect them
-reliably. The live rectifier is `metatron/aruco.py`, which carries its own
-`detect_cube_aruco` / `rectify_cube_via_cube_aruco`.
+**Severity: low as code, high as a question.** Coverage reported it at **0%**,
+and the cause is not a missing test: **nothing imports it**.
 
-So it is an unreferenced duplicate of a live path — the kind that gets a bug
-fixed in one copy and not the other. Either wire it up or delete it; leaving it
-looking like part of the pipeline is the one option with no upside.
+*Corrected after first publication.* This entry first called it "an
+unreferenced duplicate of `metatron/aruco.py`". That is wrong, and the mistake
+buried the interesting part. It is a **third rectification strategy**, and the
+most accurate of the three:
+
+| Strategy | Fiducials | Status |
+| --- | --- | --- |
+| page-corner ArUco (IDs 0-3) | far from the cube | live |
+| cube-adjacent ArUco (IDs 10-13) | beside the cube | disabled — OpenCV did not detect them on the dense sheet |
+| **inner ArUco (IDs 20-25)** | **drawn into the cube at V[7]..V[12]** | never rendered (`local_rectify`) |
+
+Its own docstring gives the rationale, and this audit's own measurements
+endorse it: page-corner markers "are far from the cube and introduce
+homography error", and **geometry is the binding axis** of the decode envelope
+— perspective collapses at strength 2.5 while blur tolerates 4 px, JPEG
+quality 10 and chroma noise σ 96. Fiducials that travel with the cube give the
+most precise warp available, on precisely the axis that limits the system.
+
+The catch is the reason it was never rendered. `ARUCO_INNER_IDS` maps vertices
+7-12 to marker IDs 20-25, and those six vertices are **six of the thirteen
+vertex carriers**. Rendering the markers puts ink on six of the 91 carriers —
+violating the rule this same session turned into an assertion (*never on the
+cube*), and paying on the very envelope the change is meant to widen.
+
+So "wire it up or delete it" is the wrong question. The right one is **does
+moving the fiducials inward buy more than the ink costs**, and it is not
+answerable today: `scripts/detect_envelope.py` states in its own docstring that
+"fiducials are handed to the rectifier exactly, so fiducial *detection* error
+is excluded" — and detection error is exactly the term that separates the three
+strategies. The bench is blind to what killed the module.
+
+**Recommendation: extend the bench before disposing of the module.** Adding a
+fiducial-localisation axis (a) makes the envelope honest, which the handover
+already flags as optimistic, (b) answers this question as a by-product, and
+(c) attacks the binding axis rather than one with headroom to spare. EPX-H §2.5
+already shows how to draw near carriers without touching them, if the
+measurement says the trade is worth taking.
+
+### N-10.1 — the bench was extended; here is what it says
+
+Done the same day (`degrade.fiducial_shift`, `degrade.fiducial_jitter`,
+`degrade.fiducial_radius`, two new tables in `scripts/detect_envelope.py`).
+The error is reported in the two parts the fit treats differently, and they
+cost wildly different amounts on a 1024 px canvas:
+
+| Fiducial error | Envelope (worst block ≤ 1) |
+| --- | --- |
+| **common mode** — the whole estimate slides | **12 px** |
+| **differential** — the six points stop describing one rigid figure | **0.5 px**, every seed |
+
+**A prediction failed, which is the useful part.** Both this analyst and the
+module's own reasoning assumed a homography would absorb a uniform
+mislocation. It does not: the *destination* is the fixed canonical frame, so
+sliding every source correspondence reads every carrier off-centre by the same
+amount. Cheap — 12 px — but not free.
+
+The differential term is roughly **twenty-four times dearer**. Sigma 1 px
+already loses draws, and single draws vary enormously (at sigma 2 px the worst
+block across five seeds ranged 0, 0, 2, 0, 13) because one badly-placed
+fiducial dominates the fit. The requirement this implies is the number the
+question needed: **about one pixel of *relative* accuracy over a 410 px figure
+radius — a quarter of a percent.**
+
+That is a demanding budget, and it is the argument `local_rectify` was making
+without evidence: fiducials drawn into the cube are localised in the same
+image patch as the carriers, so their *relative* error is far smaller than
+markers read across a whole A4 sheet under perspective. The measurement now
+leans toward its premise.
+
+It does not settle the trade. What is still unmeasured is the other side —
+what six ArUco markers *cost* when they replace six of the 91 carriers. That
+is the next measurement, and it is now a well-posed one.
 
 ### N-11 — Eidolon: coverage was configured, shadowed, and never measured
 
