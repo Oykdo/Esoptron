@@ -336,6 +336,71 @@ already flags as optimistic, (b) answers this question as a by-product, and
 already shows how to draw near carriers without touching them, if the
 measurement says the trade is worth taking.
 
+### N-10.2 — the bench was extended, and then the numbers it produced were wrong
+
+**Corrected the same day, after N-10.1 below was written.** Everything in
+N-10.1 stands as a description of *what was measured*; the measurements
+themselves were distorted by a defect one layer down, and the conclusion drawn
+from them is withdrawn.
+
+`detect._compute_homography` advertised "normalized DLT + SVD" in its docstring
+and performed no normalisation. The DLT minimises an *algebraic* residual; on
+raw pixel coordinates — 0..1024, every fiducial hundreds of units from the
+origin — that residual weights each correspondence by its distance from the
+origin. It is the shipping path: `detect.rectify` calls it on every photograph,
+with six detected fiducials that are never projectively consistent, which is
+precisely the regime where the conditioning decides the answer.
+
+Fitting six deliberately inconsistent points, then translating and scaling both
+sets and refitting, must return the same homography. The un-normalised version
+differed by ~1.0 in matrix entries; normalised, by 4e-13.
+
+With the fit corrected, on seeds 2026 and 77:
+
+| Envelope | as published in N-10.1 | corrected |
+| --- | --- | --- |
+| perspective | 2.25 | **12** |
+| fiducial, differential | 0.5 px | **6 px** |
+| fiducial, common mode | 12 px | 12 px — unchanged |
+| blur / chroma noise | 4 px / σ 96 | unchanged |
+
+The common-mode envelope not moving is the control: a pure translation is
+fitted exactly under either weighting, so had it moved the cause would have
+been something else.
+
+**Three claims are withdrawn.**
+
+*"About one pixel of relative accuracy over a 410 px figure radius, a quarter
+of a percent."* Mostly a measurement of the missing normalisation. The honest
+figure is nearer **6 px over 410 px, about 1.5%**.
+
+*"Geometry is the binding axis."* Inherited from the earlier handover and
+repeated here. Perspective produced **zero errors at every level of the tested
+ladder** after the fix, and breaks only at 16 — five times the pinned 2.25.
+There was no cliff at 2.5; there was a fitter that degraded with displacement.
+
+*The N-10 argument for `local_rectify`* — that the relative-accuracy budget is
+so tight only cube-adjacent fiducials could meet it. With a correct fit the
+budget is twelve times looser, and page-corner ArUco may well clear it. The
+question is open again, and on weaker grounds than N-10.1 gave it.
+
+**A prior result loses its demonstration.** `tests/test_erasure_budget.py`
+showed that a mediocre photograph fails to decode, is not rescued by
+distance-ranked erasures, and is rescued by margin-ranked ones. After the fix
+that photograph decodes with **no erasures at all**. Searching perspective
+7–10, blur 3.0–3.5 in steps of 0.1 and JPEG q50/q40/q30 found **no window**
+where margin ranking rescues what nothing else does — the transition from
+"decodes unaided" to "nothing decodes" is one blur step. This does not show
+margin ranking to be wrong: common-mode cancellation is a real effect and
+harsher photographs will still need it. It shows the bench no longer
+demonstrates the benefit, and the tests now say so rather than asserting a
+result nobody can reproduce.
+
+**Sequencing note for anyone repeating this.** The corrected perspective axis
+is still not a *tilt* axis — `PERSPECTIVE_UNIT` remains six displacements no
+homography can realise (N-10.1). Fixing the fitter removed the larger error;
+the axis's own defect is still there and is the next piece of work.
+
 ### N-10.1 — the bench was extended; here is what it says
 
 Done the same day (`degrade.fiducial_shift`, `degrade.fiducial_jitter`,

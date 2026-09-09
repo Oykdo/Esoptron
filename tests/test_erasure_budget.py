@@ -145,26 +145,44 @@ def test_confident_carriers_are_left_alone(card):
 
 # --- the payoff ------------------------------------------------------------
 
-def test_margin_rescues_the_mediocre_photo(card, mediocre):
-    """One margin-ranked erasure per block turns a failure into the seed."""
+def test_the_mediocre_photo_no_longer_needs_rescuing(card, mediocre):
+    """Rewritten 2026-09-09. This test used to demonstrate the margin ladder,
+    and the demonstration is gone.
+
+    It asserted that ``MEDIOCRE`` fails to decode with distance-ranked
+    erasures and succeeds with margin-ranked ones -- the finding the whole
+    erasure-ranking work rests on. With ``detect._compute_homography``
+    normalised (it claimed a normalised DLT and did none), the same photograph
+    **decodes with no erasures at all**. The failure it was rescuing was
+    largely produced by the fit.
+
+    Searched for a level where the margin still makes the difference:
+    perspective 7 to 10, blur 3.0 to 3.5 in steps of 0.1, JPEG q50/q40/q30.
+    There is no window -- the transition from "decodes unaided" to "nothing
+    decodes" is a single blur step. That is on one card and one degradation
+    family, so it does not prove margin ranking useless; it does mean this
+    bench no longer demonstrates its benefit, and a test that claimed
+    otherwise would be asserting a result nobody can reproduce.
+
+    What is pinned instead is the fact that replaced it: the ladder is not
+    needed here, and margin-ranked erasures do not *break* what already works.
+    Anyone reviving the original claim needs a case where a photo genuinely
+    fails, and should re-derive it rather than re-tune this one until it goes
+    red.
+    """
     seed, _cw, _img = card
     syms, dists, margins = mediocre
 
-    with pytest.raises(ValueError):
-        decode_private(syms, erasures=erasures_from_confidences(dists))
+    unaided, _version = decode_private(syms)
+    assert unaided == seed, (
+        "the mediocre photo needs help again -- the erasure ladder may be "
+        "demonstrable once more; re-derive it rather than restoring the old "
+        "assertions")
 
-    era = erasures_per_block(dists, margins=margins, max_per_block=1)
-    recovered, _version = decode_private(syms, erasures=era)
-    assert recovered == seed
-
-
-def test_distance_ranking_does_not_rescue_it(mediocre):
-    """The same budget, ranked by distance, still fails — ranking is the fix."""
-    syms, dists, _margins = mediocre
-    for n in (1, 2):
-        with pytest.raises(ValueError):
-            decode_private(syms, erasures=erasures_per_block(
-                dists, max_per_block=n))
+    for era in (erasures_from_confidences(dists),
+                erasures_per_block(dists, margins=margins, max_per_block=1)):
+        recovered, _version = decode_private(syms, erasures=era)
+        assert recovered == seed, "spending erasures broke a working decode"
 
 
 def test_extract_robust_recovers_the_mediocre_photo(card):

@@ -33,10 +33,12 @@ ALWAYS_TEXT = {"SPECS.SHA3-256", ".gitattributes", ".editorconfig"}
 SKIP_DIRS = {
     ".git", "node_modules", "dist", "build", "__pycache__",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", "out",
-    # Runtime state, like out/: the anchor writes its key here and the grant
-    # ledger its JSON, and a test run from the repo root is enough to create
-    # both. This gate polices source; data/ is not source, and its writers do
-    # not go through the LF discipline.
+    # Runtime state, like out/: the anchor writes its deployment key under
+    # data/ when given no explicit path, and a suite run from the repo root is
+    # enough to create it. This gate polices source.
+    #
+    # grants/ is deliberately NOT here. Its ledger is committed and recorded in
+    # SPECS.SHA3-256, so it is published state and belongs under the gate.
     "data",
     "venv", ".venv", "site-packages",
 }

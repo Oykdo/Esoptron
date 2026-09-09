@@ -13,13 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`degrade.fiducial_shift`, `degrade.fiducial_jitter`,
   `degrade.fiducial_radius`).** Every existing axis degraded the image and then
   handed the rectifier the six fiducials *exactly*, so the bench was blind to
-  the one term that separates rectification strategies — and geometry is the
-  binding axis. Reported in the two parts the fit treats differently:
+  the one term that separates rectification strategies. (Geometry was
+  believed to be the binding axis at the time; it is not — see below.) Reported in the two parts the fit treats differently:
 
   | Fiducial error | Envelope (worst block ≤ 1) |
   | --- | --- |
   | common mode — the whole estimate slides | **12 px** |
-  | differential — the six points stop describing one rigid figure | **0.5 px** |
+  | differential — the six points stop describing one rigid figure | ~~0.5 px~~ **6 px** |
 
   A prediction failed on the way, which is why the measurement was worth
   making: a homography does *not* absorb a uniform mislocation, because the
@@ -31,8 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than a mean.
 
   The useful output is a requirement: **~1 px of relative accuracy over a 410 px
-  figure radius, a quarter of a percent.** The five original envelopes are
-  unchanged (perspective 2.25, blur 4 px, JPEG q10, illumination ±50%, σ 96).
+  figure radius, a quarter of a percent.**
+
+  **Superseded within the day.** That number, and the perspective envelope it
+  was measured beside, were distorted by a defect one layer down:
+  `detect._compute_homography` claimed a normalised DLT and did none (see
+  *Fixed*). Corrected on seeds 2026 and 77: the differential envelope is
+  **6 px**, not 0.5, so the requirement is nearer **1.5%** than a quarter of a
+  percent; perspective is **12**, not 2.25. The common-mode envelope is
+  unchanged at 12 px, which is the control — a pure translation is fitted
+  exactly under either weighting. Blur 4 px and σ 96 also unchanged.
 * **CI reports test coverage.** Measured for the first time: **84%** over 7110
   statements. Reported, not gated — a threshold on a number that moves with
   every new module turns a signal into a chore, so the figure is in the log
@@ -156,6 +164,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column alignment must be exact.
 
 ### Fixed
+
+* **The homography fit was never normalised, despite saying so.**
+  `detect._compute_homography` advertised "normalized DLT + SVD" and performed
+  none, so it minimised an algebraic residual over raw pixel coordinates and
+  the fit was weighted by each fiducial's distance from the origin. This is the
+  shipping path — `detect.rectify` runs it on every photograph, with six
+  detected fiducials that are never projectively consistent.
+
+  Fitting six inconsistent points, then translating and scaling both sets and
+  refitting, must return the same homography: the old version differed by ~1.0
+  in matrix entries, the new one by 4e-13.
+
+  The consequences reach published numbers. Perspective holds to **12** and
+  breaks at 16, against a pinned 2.25 — there was no cliff at 2.5, there was a
+  fitter that degraded with displacement, so *"geometry is the binding axis"*
+  is withdrawn. The differential fiducial envelope moved from 0.5 px to 6 px;
+  common mode did not move, which is the control. And
+  `tests/test_erasure_budget.py` loses its demonstration: the mediocre
+  photograph it rescued now decodes with **no erasures at all**, and no
+  degradation level was found where margin ranking rescues what nothing else
+  does. That does not make margin ranking wrong — common-mode cancellation is
+  real — but the bench no longer shows the benefit, and the tests say so.
 
 * **The legacy mobile crypto chain is deleted, not disabled (audit P0-2).**
   `server/app.py` carried ~390 lines of inline HTML with a hand-rolled SHA-256

@@ -37,12 +37,22 @@ from eopx.metatron.mnemonic import decode_private
 CANVAS = 1024
 SEED_RNG = 2026
 
-# Measured envelopes (worst block still <= 1), canvas 1024:
-#   perspective  2.25   | blur 4.0 px | JPEG q10
+# Measured envelopes (worst block still <= 1), canvas 1024, seeds 2026 and 77:
+#   perspective  12     | blur 4.0 px | JPEG q10
 #   illumination 0.5    | chroma noise sigma 96
+#   fiducial error: 12 px common mode, sigma 6 px differential
 # The levels below sit inside those, with margin.
+#
+# Perspective was pinned at 2.25 until 2026-09-09, and the difference is not a
+# pipeline improvement: `detect._compute_homography` claimed a normalised DLT
+# in its docstring and did none, so the fit was weighted by each fiducial's
+# distance from the origin. Roughly four fifths of what this axis measured was
+# that. With the fit corrected the axis holds to 12 and breaks at 16 -- five
+# times the headroom, on both seeds. The differential fiducial envelope moved
+# the same way, 0.5 px to 6 px; the common-mode one did not move at all, which
+# is the control.
 MUST_SURVIVE = {
-    "perspective": 2.0,
+    "perspective": 8.0,
     "blur": 3.0,
     "jpeg": 40,
     "illumination": 0.4,
@@ -117,16 +127,31 @@ def test_chroma_noise_within_envelope(card):
 
 # --- the cliff -------------------------------------------------------------
 
-def test_perspective_cliff_is_where_we_think_it_is(card):
-    """Geometry is the binding axis: past ~2.5 the block budget collapses.
+def test_geometry_is_not_the_binding_axis(card):
+    """Rewritten 2026-09-09. It used to assert the opposite, and was right
+    about the measurement and wrong about the cause.
 
-    Documented, not tolerated — if this ever passes at 3.0 the pipeline got
-    substantially better and the envelope above should be re-measured.
+    The old claim was "geometry is the binding axis: past ~2.5 the block budget
+    collapses", pinned by asserting failure at strength 3.0. There is no cliff
+    at 3.0. There is no cliff anywhere below 16. What collapsed at 2.5 was
+    `detect._compute_homography`, which advertised a normalised DLT and
+    performed none: it minimised an algebraic residual over raw pixel
+    coordinates, so the fit degraded with the displacement rather than the
+    tilt. The axis was measuring the fitter.
+
+    What is true now: strength 12 still decodes clean, 16 does not. Both bounds
+    hold on seeds 2026 and 77, so this is a property of the pipeline rather
+    than of one card.
     """
     _seed, codeword, img, _ = card
-    degraded, fid = perspective(img, 3.0, canvas=CANVAS)
-    sc = score(degraded, fid, codeword, canvas=CANVAS)
-    assert sc.worst_block > 1
+
+    assert score(*perspective(img, 12.0, canvas=CANVAS), codeword,
+                 canvas=CANVAS).worst_block <= 1, "the envelope shrank"
+
+    assert score(*perspective(img, 16.0, canvas=CANVAS), codeword,
+                 canvas=CANVAS).worst_block > 1, (
+        "geometry now survives past 16 — re-measure the envelope and re-pin, "
+        "and check the fiducial axes too, since they moved together last time")
 
 
 # --- axes compound ---------------------------------------------------------
@@ -144,13 +169,21 @@ def test_a_plausible_photo_decodes(card):
     assert _decode(sc, seed), "a plausible photo must round-trip to the seed"
 
 
-def test_degradation_compounds_across_axes(card):
-    """Each axis alone is inside its envelope; together they are not.
+def test_degradation_compounds_but_stays_within_budget(card):
+    """Rewritten 2026-09-09: axes still compound, and no longer past the budget.
 
-    This is the finding that matters: single-axis envelopes are optimistic,
-    because a real photo pays every axis at once. The bound below says how bad
-    a *mediocre* shot gets — worst block 2, which pure error correction cannot
-    fix but three erasures per block could.
+    The old assertion was `worst_block >= 2` — "a mediocre photo pays every
+    axis at once and lands past pure error correction". That was true when it
+    was written and is false now, for the same reason as the cliff above: the
+    homography fit was contributing most of the damage attributed to
+    perspective. With it corrected the same stack yields 4 errors on seed 2026
+    and 2 on seed 77, and worst block 1 on both.
+
+    Compounding itself is real and still worth pinning — errors do accumulate
+    across axes rather than staying at zero. What is no longer true is that
+    they accumulate *past the error budget*, and the difference matters: it is
+    the premise the erasure ladder in `tests/test_erasure_budget.py` was built
+    on.
     """
     _seed, codeword, img, _ = card
     degraded, fid = perspective(img, 2.0, canvas=CANVAS)
@@ -159,10 +192,12 @@ def test_degradation_compounds_across_axes(card):
     degraded = chroma_noise(degraded, 16.0, seed=7)
     degraded = jpeg(degraded, 50)
     sc = score(degraded, fid, codeword, canvas=CANVAS)
-    assert sc.worst_block >= 2, (
-        "the mediocre-photo case no longer compounds past the error budget — "
-        "re-measure the envelope and re-pin this test")
-    assert sc.worst_block <= 3, f"degradation worse than recorded: {sc.per_block}"
+
+    assert sc.errors > 0, (
+        "the mediocre stack now reads every carrier correctly — the axes no "
+        "longer compound at all, which would be a bigger change than a re-pin")
+    assert sc.worst_block <= 1, (
+        f"the mediocre photo fell past the error budget again: {sc.per_block}")
 
 
 # --- fiducial localisation: the term the bench used to exclude -------------
@@ -189,18 +224,21 @@ def test_common_mode_fiducial_error_is_cheap_but_not_free(card):
     assert broken.worst_block > 1
 
 
-def test_differential_fiducial_error_is_an_order_of_magnitude_dearer(card):
-    """Sigma 1 px already puts draws out of budget, against 12 px of slide.
+def test_differential_fiducial_error_is_dearer_than_common_mode(card):
+    """Rewritten 2026-09-09. The direction survived; the factor did not.
 
-    Differential error shears the fitted warp instead of translating it, and
-    the residual grows with distance from the fiducials. The requirement it
-    implies is the useful output: about **one pixel of relative accuracy over
-    a 410 px figure radius**, a quarter of a percent. That is what separates
-    fiducials read across a whole sheet from fiducials that travel with the
-    cube.
+    First measured the same day as an order of magnitude — sigma 1 px already
+    losing draws against 12 px of uniform slide — and published as a
+    requirement of "about one pixel of relative accuracy over a 410 px figure
+    radius". That figure was mostly an artefact of the un-normalised
+    homography fit: with `detect._compute_homography` conditioned properly the
+    differential envelope moved from 0.5 px to 6 px, while the common-mode
+    envelope did not move at all.
 
-    Single draws vary wildly -- one badly-placed fiducial dominates the fit --
-    so this asserts on the distribution, not on one number.
+    The asymmetry is therefore real but modest — roughly 2x, not 24x — and the
+    honest requirement is nearer **6 px over a 410 px radius, about 1.5%**.
+    Single draws still vary, because one badly-placed fiducial dominates the
+    fit, so this asserts on the distribution.
     """
     _, codeword, img, fid = card
 
@@ -212,9 +250,10 @@ def test_differential_fiducial_error_is_an_order_of_magnitude_dearer(card):
         )
 
     assert in_budget(0.0) == 5, "no jitter must be exact"
-    # The asymmetry is the finding: a slide of 8 px is free (test above) while
-    # a sigma of 6 px loses most draws.
-    assert in_budget(6.0) <= 2
+    assert in_budget(6.0) == 5, "the differential envelope shrank below 6 px"
+    # It does break, so the assertion above is not vacuous: 3/5 at 12 px and
+    # 1/5 at 16 px on both seeds measured.
+    assert in_budget(16.0) <= 2
 
 
 def test_fiducial_radius_makes_a_sigma_scale_free(card):

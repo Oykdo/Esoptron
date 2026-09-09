@@ -212,12 +212,12 @@ author:            Jérémy ZGONEC
 timestamp:         2026-09-09T14:41:20Z
 
 spec:              docs/audit_report_2026-09-09.md
-hash:              sha3-256:afaf84d20576d5d206d579ff552cb2bbb4a5d8a5624ddcc14c110a73972b3881
-bytes-raw:         27012
-bytes-normalised:  27012
+hash:              sha3-256:ead5349dfc94a4e350584156ad1ef0e770bf5ffd9f9aa315a4a274950a4d9fe7
+bytes-raw:         30508
+bytes-normalised:  30508
 normalisation:     utf8+nobom+lf+striptrailws+finallf+nfc
 author:            Jérémy ZGONEC
-timestamp:         2026-09-09T18:49:51Z
+timestamp:         2026-09-09T20:02:14Z
 
 spec:              grants/ledger.json
 hash:              sha3-256:22f6db6e3ef9a5568b41df0a861528408f16cea3e20143c103c72174d96634e9
