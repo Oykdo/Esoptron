@@ -29,7 +29,7 @@ from PIL import Image
 from .graph import VERTICES, EDGES, NUM_VERTICES, NUM_EDGES
 from .palette import classify_color, classify_margin
 from .render import (
-    DEFAULT_CANVAS, MARGIN_FRAC, VERTEX_RADIUS_FRAC,
+    DEFAULT_CANVAS, VERTEX_RADIUS_FRAC,
     EDGE_TAG_RADIUS_FRAC, _project, edge_tag_position,
 )
 
@@ -279,7 +279,6 @@ def extract_canonical_full(img: Image.Image
                 best_d = d
                 best_margin = m
         # Also try disk sampling at refined position (more tolerant of blur)
-        from collections import Counter as _Counter
         disk_r = r_v * 0.80
         rgb_disk = _sample_disk_color_inner(arr, refined_cx, refined_cy, disk_r)
         sym_disk, d_disk, m_disk = classify_margin(*rgb_disk)
@@ -287,7 +286,7 @@ def extract_canonical_full(img: Image.Image
         if d_disk < best_d:
             best_d = d_disk
             best_margin = m_disk
-        counts = _Counter(votes).most_common()
+        counts = Counter(votes).most_common()
         symbols[i] = counts[0][0]
         distances[i] = best_d
         # A split vote is doubt no distance can express: the samples read
@@ -319,8 +318,6 @@ def extract_robust(img: Image.Image,
                with the symbols/distances that produced it.
                If None, just returns the first extract_canonical result.
     """
-    from .reed_solomon import TOTAL_N
-
     if img.mode != "RGB":
         img = img.convert("RGB")
     arr = np.asarray(img).copy()
@@ -381,7 +378,6 @@ def extract_robust(img: Image.Image,
 
     # Strategy 4: re-extract vertices with larger position offsets
     # to compensate for homography misalignment on phone photos
-    _Counter = None  # lazy import
     for offset in [4.0, 8.0]:
         alt_syms = list(syms)
         alt_dists = list(dists)
@@ -394,7 +390,6 @@ def extract_robust(img: Image.Image,
                 arr, cx, cy, r_v, r_v * 3.0, size)
             votes = []
             best_d = 999.0
-            best_sym = 0
             for dx, dy in [(0,0), (offset,0), (-offset,0),
                            (0,offset), (0,-offset)]:
                 rgb = _sample_ring_color(arr, refined_cx+dx, refined_cy+dy,
@@ -403,10 +398,7 @@ def extract_robust(img: Image.Image,
                 votes.append(sym)
                 if d < best_d:
                     best_d = d
-                    best_sym = sym
-            if _Counter is None:
-                from collections import Counter as _Counter
-            alt_syms[i] = _Counter(votes).most_common(1)[0][0]
+            alt_syms[i] = Counter(votes).most_common(1)[0][0]
             alt_dists[i] = best_d
         result = decode_fn(alt_syms)
         if result:
