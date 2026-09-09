@@ -1,0 +1,11 @@
+{
+  "relic_key": "lugdunum_echo_01",
+  "relic_secret_hex": "8e77a8af7804b6ccace85871edde8300c7c1156ff1e45ed622c3af1e37480510",
+  "layer_key_hex": "03c31515b0163876b796fd38c9c32b08ec2e9c365d411e6c2215145f32063f68",
+  "sealed_hex": "b232c880ad27aa638cc38c12ca87932a397ba7c382daa2b8d913b6758be6e392e7cfc8cefe6e8b8ae3bbbe4d3031cc38baeb04d34ec800bbca4b5d86527e4812188bea5c8e0813db9eb128ec24626b5408c5da8f8beb44c62334ac0e2b3aee01f21f652f46f6baa1cafcf4b7a7637b32ddfb69c142f1c1bfe62c92633d29cdeb4f6742c5effd677c6780df472d59a601244d658328eabbcad7146f87585e27e764d3fc492ddd92484f0150a5a052af99323212b9dc385536eab5360a264bd85b95ad53423d347f92dd33a08378a853a42f1ea83b45c7fbcbe714aef648a682c259174210a9dd6b9d03f6f88dd3deabc8cb4d29e98ac6edc05c2be185ba1c7ca2224d071abacd86d917b724b8c2f5b8f88a2d513ee7cffa018a839e4b81edb6fc66b37adf67ff3629a7979692ac9397c95484e10d40c6adf0181768e00e2330ac0e6cc174375bb5bcc48889114e836b1256f2346e712d37edbc09614489a556f4eeffafde5123d124253efae2135939f498a4e839b905fb982e0ceb26de1fc0d0ae4efd",
+  "hidden_plaintext": "{\"layer\":\"primordial_echo\",\"relic\":\"lugdunum_echo_01\",\"surfaces\":[[1.63,0.0,0.0],[1.4682,0.8477,0.3],[0.8182,1.4172,0.0],[0.0,1.6611,-0.3],[-0.8412,1.457,-0.0],[-1.4202,0.8199,0.3],[-1.7122,0.0,0.0],[-1.494,-0.8625,-0.3],[-0.8938,-1.5481,-0.0],[-0.0,-1.7923,0.3],[0.8762,-1.5176,0.0],[1.5087,-0.871,-0.3]],\"anim\":{\"type\":\"pulse+spin\",\"period_s\":7,\"amp\":0.25}}",
+  "kdf": "HKDF-SHA3-512",
+  "info": "eidolon.relic.layer.v1",
+  "aead": "ChaCha20-Poly1305",
+  "blob": "nonce(12)||ct||tag"
+}

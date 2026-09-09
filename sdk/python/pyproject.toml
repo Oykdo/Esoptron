@@ -20,7 +20,9 @@ classifiers = [
 ]
 dependencies = [
     "Pillow>=10.0",
-    "pqcrypto>=0.3",
+    # Upper bound is load-bearing: pqcrypto 1.0 renamed ml_dsa_87.generate_keypair()
+    # to keygen(), which breaks every key operation at runtime.
+    "pqcrypto>=0.3.4,<1.0",
 ]
 
 [project.optional-dependencies]

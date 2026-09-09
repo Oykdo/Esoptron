@@ -35,7 +35,9 @@ classifiers = [
 dependencies = [
     "Pillow>=10.0",
     "numpy>=1.26",
-    "pqcrypto>=0.3",
+    # Upper bound is load-bearing: pqcrypto 1.0 renamed ml_dsa_87.generate_keypair()
+    # to keygen(), which breaks every key operation in eopx.format.keys at runtime.
+    "pqcrypto>=0.3.4,<1.0",
     "cryptography>=41.0",
     "argon2-cffi>=23.0",
     "mnemonic>=0.21",

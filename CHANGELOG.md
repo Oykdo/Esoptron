@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **EPX-F — the artifact figure (`eopx.artifact_figure`).** `F` maps a `.eopx`
+  to a 16×8 grid of 4-bit levels, derived by HKDF-SHA3-512 from the
+  **pre-image** half of the signed manifest — `merkle_root` and
+  `dilithium_pk_fp` — so it can be recomputed from the file by anyone.
+  `payload_hash` and `image_sha3_512` are inadmissible inputs: both are
+  downstream of the pixels the figure is drawn into, which would make the
+  derivation a fixed point with no solution. Because the inputs sit inside
+  `canonical_payload()` and the drawing reaches it through `image_sha3_512`,
+  the existing ML-DSA-87 signature already covers both ends — no new primitive,
+  no new trust root. Two bands: a **content band** (rows 0–5, `merkle_root`
+  only) that an artifact keeps for life, and an **epoch band** (rows 6–7) that
+  moves when the issuing key rotates, so a rotation is legible without turning
+  a printed badge into a stranger. Glyphs are presentation — `figure_digest`
+  covers the levels, so a Unicode ramp is a free substitution. Frozen at v1
+  with normative test vectors (`docs/specs/EPX-F_artifact_figure.md` §9,
+  `tests/test_artifact_figure.py`); brand only, never security (POSITIONING).
+* **Epoch links (`eopx.epoch_chain`, EPX-F §5).** A badge outlives the key that
+  minted it. An `EpochLink` binds two consecutive epochs and carries the
+  predecessor's **full public key** — a fingerprint identifies a key, it does
+  not let anyone verify a signature made with it. Signed from both ends: the
+  successor's signature is what lets a verifier holding only today's key walk
+  *backwards*, and the predecessor's — minted at rotation time, while the old
+  key still lives — is what stops a stolen current key from inventing an
+  ancestor and, with it, a whole fabricated lineage. Links carrying both are
+  **strong**; `resolve_epoch` refuses weak ones unless explicitly asked, and
+  the walk is hop-bounded and cycle-checked. An optional third witness key
+  cosigns the same digest, reusing the dual-signature pattern of
+  `tools/sign_spec.py`. Revocation is deliberately out of scope for v1.
+* **Figure plates (`eopx.figure_plate`, EPX-F §6).** Unicode block-element
+  plates, galleries and animation frames over an EPX-F grid. A **frozen** plate
+  has a solid frame and prints its tag — the thing a reader compares against a
+  recomputation. A **living** plate has a dashed frame and prints **no tag**:
+  the omission is the safety property, so a moving face can never be mistaken
+  for the artifact's identity. `UNICODE_RAMP` orders block elements by ink
+  coverage and breaks ties by shape; `ASCII_RAMP` remains the choice when
+  column alignment must be exact.
+
+### Fixed
+
+* **`pqcrypto` capped below 1.0.** Upstream 1.0.0 renamed
+  `pqcrypto.sign.ml_dsa_87.generate_keypair()` to `keygen()`, so a fresh
+  install resolved to a version where every key operation in
+  `eopx.format.keys` raises `AttributeError` (first hit while provisioning the
+  production anchor). Both `pyproject.toml` and `sdk/python/pyproject.toml`
+  now require `pqcrypto>=0.3.4,<1.0`. Lifting the cap means porting `keys.py`
+  to the 1.0 API first.
+
+### Added
+
 * **Figurative relic figure.** `eopx.collection.figure` draws each Codex relic
   as the *object it is* — a mirror, key, ember, lantern, crown… (12 bespoke
   ASCII silhouettes). The fixed silhouette makes the object recognisable; its

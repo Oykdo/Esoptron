@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { sha3_512 } from "@noble/hashes/sha3";
 import { CodexRelicDTO } from "../lib/api";
+import { tryReveal } from "../lib/reveal";
 
 /**
  * A 3D representation of a relic, driven by the SAME spinor seed as its 2D
@@ -18,6 +19,10 @@ import { CodexRelicDTO } from "../lib/api";
 interface Props {
   relic: CodexRelicDTO;
   size?: number;
+  /** EPX-L: opaque sealed-layer blob from blend_data (hex). */
+  sealedLayerHex?: string | null;
+  /** EPX-L: secret recovered by scanning the relic; reveals the hidden layer. */
+  relicSecret?: Uint8Array | null;
 }
 
 const CODEX_DOMAIN = "esoptron.codex.v1";
@@ -66,7 +71,12 @@ const ELEMENT_HUE: Record<string, number> = {
   Earth: 132,
 };
 
-export function RelicCanvas({ relic, size = 320 }: Props) {
+export function RelicCanvas({
+  relic,
+  size = 320,
+  sealedLayerHex = null,
+  relicSecret = null,
+}: Props) {
   const mountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -159,6 +169,30 @@ export function RelicCanvas({ relic, size = 320 }: Props) {
       group.add(new THREE.Line(g, m));
     }
 
+    // --- EPX-L: reveal the hidden layer iff a scanned relic secret is given ---
+    const hidden = tryReveal(relicSecret, sealedLayerHex);
+    const revealMeshes: THREE.Mesh[] = [];
+    let revealPeriod = 7;
+    let revealAmp = 0.25;
+    if (hidden) {
+      revealPeriod = hidden.anim?.period_s || 7;
+      revealAmp = hidden.anim?.amp ?? 0.25;
+      const hGeo = new THREE.SphereGeometry(0.06, 14, 14);
+      const hMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1405,
+        emissive: new THREE.Color(`hsl(${(hue + 40) % 360}, 90%, 62%)`),
+        emissiveIntensity: 0.9,
+        roughness: 0.3,
+      });
+      disposables.push(hGeo, hMat);
+      for (const [hx, hy, hz] of hidden.surfaces) {
+        const mesh = new THREE.Mesh(hGeo, hMat);
+        mesh.position.set(hx, hy, hz);
+        group.add(mesh);
+        revealMeshes.push(mesh);
+      }
+    }
+
     // --- lights ---
     const ambient = new THREE.AmbientLight(0xffffff, 0.5);
     const point = new THREE.PointLight(sealColor, 1.4, 50);
@@ -171,6 +205,7 @@ export function RelicCanvas({ relic, size = 320 }: Props) {
 
     let raf = 0;
     let last = 0;
+    let elapsed = 0;
     let mounted = true;
     const tick = (t: number) => {
       if (!mounted) return;
@@ -178,6 +213,11 @@ export function RelicCanvas({ relic, size = 320 }: Props) {
       last = t;
       group.rotation.y += dt * spin;
       group.rotation.z += dt * spin * 0.12;
+      if (revealMeshes.length) {
+        elapsed += dt;
+        const s = 1 + revealAmp * Math.sin((2 * Math.PI * elapsed) / revealPeriod);
+        for (const mesh of revealMeshes) mesh.scale.setScalar(s);
+      }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };
@@ -192,7 +232,7 @@ export function RelicCanvas({ relic, size = 320 }: Props) {
         mount.removeChild(renderer.domElement);
       }
     };
-  }, [relic.key, relic.element, relic.seal_hue, size]);
+  }, [relic.key, relic.element, relic.seal_hue, size, sealedLayerHex, relicSecret]);
 
   return <div className="relic-canvas" ref={mountRef} aria-hidden="true" />;
 }
