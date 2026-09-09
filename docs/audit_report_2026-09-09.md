@@ -336,6 +336,44 @@ already flags as optimistic, (b) answers this question as a by-product, and
 already shows how to draw near carriers without touching them, if the
 measurement says the trade is worth taking.
 
+### N-10.3 — the geometry axis, finally measuring geometry
+
+The last of the three. `perspective(img, strength)` displaced the six
+fiducials by six hand-chosen vectors, least-squares-fitted a homography to
+them, warped the image by the fit, and returned the *unfitted* targets. No
+homography can realise those displacements, so the two never agreed: 68 px of
+gap at the level pinned as the envelope, on top of the un-normalised fit of
+N-10.2. The axis was four parts fiducial error to one part geometry, and its
+`strength` scalar had no interpretation at all.
+
+Replaced by `tilt(img, tilt_deg, ...)`: the card plane is rotated in 3-D about
+an in-plane axis and reprojected through a pinhole, and the fiducial
+destinations are **derived from that homography** instead of fitted to it.
+Verified at every angle 0-88 degrees:
+
+| property | result |
+| --- | --- |
+| residual, max ‖H(src) − dst‖ | **identically 0.0** |
+| `_compute_homography` recovers H | ~1e-12 |
+| round trip over carrier positions | ~1e-12 (was 19.4 px) |
+| identity at 0 degrees | exact |
+
+**The envelope is 84 degrees**, breaking at 85, on seeds 2026 and 77 alike;
+75 degrees with a mild companion (blur 1.5, JPEG q70). A card tilted 84
+degrees is nearly edge-on.
+
+So the verdict inherited from the handover — *"geometry is the binding axis"* —
+is not merely mis-numbered, it is backwards. **Tilt is not a binding condition
+at any angle a person would photograph from.** What binds is finding the
+fiducials, which is what `fiducial_shift` and `fiducial_jitter` measure, and
+the honest headline for this whole line of work is: *tilt is nearly free;
+locating the fiducials is the entire cost.*
+
+The scalar is now an angle, which means an envelope can be stated as a capture
+condition a person can act on rather than an opaque unit — the property the
+old axis never had, and the reason its number survived unquestioned for so
+long.
+
 ### N-10.2 — the bench was extended, and then the numbers it produced were wrong
 
 **Corrected the same day, after N-10.1 below was written.** Everything in

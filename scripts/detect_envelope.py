@@ -13,6 +13,14 @@ The last line of each table is the envelope: the harshest level at which the
 worst block still holds at 1. Those are the values pinned (with margin) in
 ``tests/test_detect_envelope.py``.
 
+The geometry axis is a real tilt: the card plane is rotated in 3-D and
+reprojected, and the fiducial destinations are *derived from* that homography
+rather than fitted to it. Its predecessor displaced the six fiducials by six
+hand-chosen vectors no homography can realise, fitted a matrix to them, warped
+by the fit and returned the unfitted targets — 68 px of injected fiducial
+error at the level once pinned as the envelope. An angle also means something
+a person can act on: "the card may be tilted N degrees".
+
 The last two tables measure the term the others exclude. Every image axis
 hands the rectifier the six fiducials exactly; a scanner has to *find* them
 and is wrong by some amount, and that error is what separates one
@@ -39,11 +47,11 @@ from eopx.metatron.degrade import (
     fiducial_shift,
     illumination,
     jpeg,
-    perspective,
+    tilt,
     score,
 )
 
-PERSPECTIVE_LEVELS = (0.0, 1.0, 1.5, 2.0, 2.25, 2.5, 3.0, 4.0)
+TILT_LEVELS = (0.0, 30.0, 60.0, 70.0, 75.0, 80.0, 82.0, 84.0, 85.0, 86.0)
 BLUR_LEVELS = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
 JPEG_LEVELS = (95, 90, 80, 70, 60, 50, 40, 30, 20, 15, 10, 5)
 ILLUMINATION_LEVELS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
@@ -104,10 +112,10 @@ def main() -> int:
     print(f"canvas={args.canvas}px  seed={args.seed}  "
           f"carriers=91  blocks=7  budget=1 error or 3 erasures per block")
 
-    _table("perspective (x = handheld tilt unit)", "strength", [
-        (lvl, score(*perspective(img, lvl, canvas=args.canvas),
+    _table("tilt (card plane rotated and reprojected)", "degrees", [
+        (lvl, score(*tilt(img, lvl, canvas=args.canvas),
                     codeword, canvas=args.canvas))
-        for lvl in PERSPECTIVE_LEVELS])
+        for lvl in TILT_LEVELS])
 
     _table("gaussian blur", "radius px", [
         (lvl, score(blur(img, lvl), fid, codeword, canvas=args.canvas))

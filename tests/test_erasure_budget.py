@@ -24,7 +24,7 @@ from eopx.metatron.degrade import (
     chroma_noise,
     illumination,
     jpeg,
-    perspective,
+    tilt,
 )
 from eopx.metatron.detect import (
     erasures_from_confidences,
@@ -40,10 +40,16 @@ from eopx.metatron.reed_solomon import NUM_BLOCKS
 
 CANVAS = 1024
 
-#: Every axis at a level a mediocre-but-ordinary shot produces. Alone each is
-#: inside its envelope; together they push the worst block to 2, past pure
-#: error correction. This is the case the margin has to rescue.
-MEDIOCRE = dict(perspective=2.0, blur=2.5, illumination=0.35,
+#: Every axis at a level a mediocre-but-ordinary shot produces.
+#:
+#: This used to say "together they push the worst block to 2, past pure error
+#: correction — the case the margin has to rescue". It no longer does, and the
+#: reason is not that the photo got easier: the geometry axis was
+#: `perspective(strength=2.0)`, which injected 68 px of fiducial error under
+#: the name of tilt, on top of an un-normalised homography fit. With both
+#: corrected and a real 30-degree tilt the stack yields 3 errors on seed 2026
+#: and worst block 1 — inside the error budget, needing no erasures at all.
+MEDIOCRE = dict(tilt=30.0, blur=2.5, illumination=0.35,
                 noise=16.0, jpeg=50)
 
 
@@ -59,7 +65,7 @@ def card():
 def mediocre(card):
     """(symbols, distances, margins) read off a mediocre photograph."""
     _seed, _cw, img = card
-    degraded, fid = perspective(img, MEDIOCRE["perspective"], canvas=CANVAS)
+    degraded, fid = tilt(img, MEDIOCRE["tilt"], canvas=CANVAS)
     degraded = blur(degraded, MEDIOCRE["blur"])
     degraded = illumination(degraded, MEDIOCRE["illumination"])
     degraded = chroma_noise(degraded, MEDIOCRE["noise"], seed=7)
@@ -188,7 +194,7 @@ def test_the_mediocre_photo_no_longer_needs_rescuing(card, mediocre):
 def test_extract_robust_recovers_the_mediocre_photo(card):
     """End to end through the retry ladder, not by calling the pieces."""
     seed, _cw, img = card
-    degraded, fid = perspective(img, MEDIOCRE["perspective"], canvas=CANVAS)
+    degraded, fid = tilt(img, MEDIOCRE["tilt"], canvas=CANVAS)
     degraded = blur(degraded, MEDIOCRE["blur"])
     degraded = illumination(degraded, MEDIOCRE["illumination"])
     degraded = chroma_noise(degraded, MEDIOCRE["noise"], seed=7)

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **The geometry axis measures geometry (`degrade.tilt`,
+  `degrade.tilt_homography`).** `perspective(img, strength)` displaced the six
+  fiducials by six hand-chosen vectors, least-squares-fitted a homography,
+  warped by the fit and returned the *unfitted* targets. No homography can
+  realise those displacements — 68 px of gap at the pinned envelope — so the
+  axis was four parts fiducial error to one part geometry, and `strength` had
+  no interpretation.
+
+  `tilt` rotates the card plane in 3-D and reprojects it, deriving the
+  fiducials from the homography rather than fitting to them. Residual is
+  **identically zero** at every angle 0-88°, the rectifier's own fit recovers
+  the matrix to ~1e-12, and the carrier round-trip is ~1e-12 where the old
+  axis left 19.4 px.
+
+  **Envelope: 84°**, breaking at 85 on both seeds; 75° with blur 1.5 and JPEG
+  q70. A card at 84° is nearly edge-on. *"Geometry is the binding axis"* is
+  therefore not mis-numbered but backwards: tilt is nearly free, and locating
+  the fiducials is the entire cost. `PERSPECTIVE_UNIT` and `perspective` are
+  removed rather than kept under a legacy name — a number nobody can interpret
+  keeps getting cited.
 * **The decode envelope now measures fiducial localisation
   (`degrade.fiducial_shift`, `degrade.fiducial_jitter`,
   `degrade.fiducial_radius`).** Every existing axis degraded the image and then

@@ -33,7 +33,7 @@ from typing import List, Optional, Sequence, Tuple
 import numpy as np
 from PIL import Image, ImageFilter
 
-from .detect import _compute_homography, extract_from_photo
+from .detect import extract_from_photo
 from .graph import VERTICES
 from .reed_solomon import NUM_BLOCKS
 from .render import _project
@@ -42,13 +42,6 @@ Point = Tuple[float, float]
 
 #: The six outer-hexagon vertices used as fiducials by the rectifier.
 FIDUCIAL_VERTICES = tuple(range(7, 13))
-
-#: Unit displacement of the six fiducials, scaled by the ``strength`` argument
-#: of :func:`perspective`. ``strength=1`` is a roughly steady handheld shot
-#: (~1-2% of the figure radius on a 1024 px canvas).
-PERSPECTIVE_UNIT: Tuple[Point, ...] = (
-    (6.0, -4.0), (-5.0, 3.0), (8.0, 6.0), (-2.0, 8.0), (4.0, -7.0), (-6.0, -2.0),
-)
 
 #: Background the perspective transform reveals outside the source image —
 #: the render's own backdrop, so the frame edge does not read as a symbol.
@@ -64,22 +57,92 @@ def canonical_fiducials(canvas: int) -> List[Point]:
 # Degradation axes
 # ---------------------------------------------------------------------------
 
-def perspective(img: Image.Image, strength: float, *,
-                canvas: Optional[int] = None
-                ) -> Tuple[Image.Image, List[Point]]:
-    """Tilt the card. Returns the image *and* where its fiducials moved to.
+#: Camera-to-card distance for :func:`tilt`, in canvas widths. 3.0 is roughly
+#: a phone 25 cm from an 8.5 cm card. Measured to be nearly inert: at 70 deg
+#: the score is identical for distances 1.5 through 10, because the damage is
+#: foreshortening (cos theta), not projective divergence.
+DEFAULT_TILT_DISTANCE = 3.0
 
-    ``strength`` scales :data:`PERSPECTIVE_UNIT`; the rectifier is then given
-    the displaced points, so this measures the symbol pipeline rather than
-    fiducial *detection* (which is a separate error source, not modelled here).
+
+def tilt_homography(canvas: int, tilt_deg: float, *,
+                    azimuth_deg: float = 0.0,
+                    distance: float = DEFAULT_TILT_DISTANCE) -> np.ndarray:
+    """The homography of a card plane rotated ``tilt_deg`` and reprojected.
+
+    Exposed because the fiducial destinations must be *derived* from this
+    matrix rather than fitted to it — that is the whole difference from the
+    axis this replaces.
+
+    Construction: rotate the card plane by ``tilt_deg`` about an in-plane axis
+    at ``azimuth_deg`` (Rodrigues), then project through a pinhole at
+    ``distance`` canvas widths with the focal length pinned to that distance,
+    so ``tilt_deg == 0`` yields exactly the identity rather than a silent
+    rescale. Only the first two columns of the rotation appear: the card is a
+    plane, so its third column never enters.
+    """
+    if not 0.0 <= tilt_deg < 90.0:
+        raise ValueError(f"tilt_deg must be in [0, 90), got {tilt_deg}")
+    D = distance * canvas
+    theta = np.radians(tilt_deg)
+    phi = np.radians(azimuth_deg)
+
+    # No card point may cross the camera plane, or the matrix flips silently.
+    if D <= (canvas / (2 ** 0.5)) * np.sin(theta):
+        raise ValueError(
+            f"distance {distance} is too small for tilt {tilt_deg} deg: the "
+            "card would cross the camera plane")
+
+    axis = np.array([np.cos(phi), np.sin(phi), 0.0])
+    K = np.array([[0.0, -axis[2], axis[1]],
+                  [axis[2], 0.0, -axis[0]],
+                  [-axis[1], axis[0], 0.0]])
+    R = np.eye(3) + np.sin(theta) * K + (1.0 - np.cos(theta)) * (K @ K)
+
+    H_c = np.array([
+        [R[0, 0], R[0, 1], 0.0],
+        [R[1, 0], R[1, 1], 0.0],
+        [-R[2, 0] / D, -R[2, 1] / D, 1.0],
+    ])
+
+    c = canvas / 2.0
+    to_origin = np.array([[1.0, 0.0, -c], [0.0, 1.0, -c], [0.0, 0.0, 1.0]])
+    from_origin = np.array([[1.0, 0.0, c], [0.0, 1.0, c], [0.0, 0.0, 1.0]])
+    H = from_origin @ H_c @ to_origin
+    return H / H[2, 2]
+
+
+def _apply(h: np.ndarray, point: Point) -> Point:
+    v = h @ np.array([point[0], point[1], 1.0])
+    return float(v[0] / v[2]), float(v[1] / v[2])
+
+
+def tilt(img: Image.Image, tilt_deg: float, *,
+         azimuth_deg: float = 0.0,
+         distance: float = DEFAULT_TILT_DISTANCE,
+         canvas: Optional[int] = None) -> Tuple[Image.Image, List[Point]]:
+    """Tilt the card by ``tilt_deg``. Returns the image and its fiducials.
+
+    Replaces a ``perspective(img, strength)`` axis whose ``strength`` had no
+    interpretation. That axis displaced the six fiducials by six hand-chosen
+    vectors, which no homography can realise, least-squares-fitted a matrix to
+    them, warped the image by the fit, and then handed the caller the
+    *unfitted* targets. The gap reached 68 px at the level pinned as the
+    envelope: the axis was four parts fiducial error to one part geometry.
+
+    Here the matrix comes first and the fiducials are read off it, so the
+    residual is identically zero and the axis measures tilt alone. The scalar
+    is an angle, which means an envelope can be stated as a capture condition
+    — "the card may be tilted N degrees" — instead of an opaque unit.
     """
     canvas = canvas or img.size[0]
     src = canonical_fiducials(canvas)
-    if strength == 0:
+    if tilt_deg == 0:
         return img, src
-    dst = [(x + dx * strength, y + dy * strength)
-           for (x, y), (dx, dy) in zip(src, PERSPECTIVE_UNIT)]
-    h = _compute_homography(src, dst)
+
+    h = tilt_homography(canvas, tilt_deg, azimuth_deg=azimuth_deg,
+                        distance=distance)
+    dst = [_apply(h, p) for p in src]
+
     h_inv = np.linalg.inv(h)
     h_inv = h_inv / h_inv[2, 2]
     out = img.transform(
@@ -260,8 +323,9 @@ def envelope(measure, levels: Sequence[float], *,
 
 
 __all__ = [
-    "FIDUCIAL_VERTICES", "PERSPECTIVE_UNIT", "FILL_RGB",
+    "FIDUCIAL_VERTICES", "FILL_RGB", "DEFAULT_TILT_DISTANCE",
+    "tilt", "tilt_homography",
     "fiducial_shift", "fiducial_jitter", "fiducial_radius",
-    "canonical_fiducials", "perspective", "blur", "jpeg", "illumination",
+    "canonical_fiducials", "blur", "jpeg", "illumination",
     "chroma_noise", "Score", "block_of", "score", "envelope",
 ]
