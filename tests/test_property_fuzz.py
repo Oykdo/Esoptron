@@ -165,8 +165,14 @@ class TestShamirRoundtrip:
         chosen = rng.sample(shares, k)
         assert shamir_combine(chosen) == secret
 
+    # min_size=16, not 1. Below k shares, Shamir leaks *nothing*: the value a
+    # short quorum reconstructs is independent of the secret and uniform over
+    # the byte space. For a one-byte secret that means it equals the secret one
+    # time in 256 -- which is evidence the scheme is correct, not that it
+    # leaked, so asserting inequality there asserts something false. At 16
+    # bytes a coincidence has probability 2^-128 and the assertion is sound.
     @given(
-        st.binary(min_size=1, max_size=32),
+        st.binary(min_size=16, max_size=32),
         st.integers(min_value=3, max_value=6),
     )
     @settings(max_examples=40)
