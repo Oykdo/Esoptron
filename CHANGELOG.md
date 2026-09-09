@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **CI reports test coverage.** Measured for the first time: **84%** over 7110
+  statements. Reported, not gated — a threshold on a number that moves with
+  every new module turns a signal into a chore, so the figure is in the log
+  where a drop is visible. The measurement immediately paid for itself:
+  `metatron/local_rectify.py` came back at 0%, and the reason is not a missing
+  test but that **nothing imports it** — it is an unreferenced duplicate of the
+  live rectifier in `metatron/aruco.py`, 92 statements looking like part of the
+  scan pipeline (recorded as N-10 in the audit).
 * **EPX-F ports, TypeScript SDK and PWA (`sdk/typescript/src/figure.ts`,
   `pwa/src/lib/artifactFigure.ts`, `pwa/src/lib/figurePlate.ts`).** §8 requires
   both to reproduce §9 byte for byte; both now do, and they share no code, so

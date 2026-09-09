@@ -214,9 +214,9 @@ author:            Jérémy ZGONEC
 timestamp:         2026-09-09T14:41:20Z
 
 spec:              docs/audit_report_2026-09-09.md
-hash:              sha3-256:848159b7e50f4e633520bb940b4b71072ebdfd0f42b4c929ab5c6ff082b641fa
-bytes-raw:         18473
-bytes-normalised:  18473
+hash:              sha3-256:7bebbe39783a113f34e40d87ec6f9d29e641e7f7462b8007eb217115f9f91c90
+bytes-raw:         21791
+bytes-normalised:  21791
 normalisation:     utf8+nobom+lf+striptrailws+finallf+nfc
 author:            Jérémy ZGONEC
-timestamp:         2026-09-09T17:33:10Z
+timestamp:         2026-09-09T17:50:43Z

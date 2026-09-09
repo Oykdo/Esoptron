@@ -231,13 +231,19 @@ An audit is worth as much as its stated limits.
   read-only (`/anchor/api/v1/artifact/capability`: 12 relics, 0 instated, 0
   controller). No penetration testing, no load testing, no TLS or reverse-proxy
   review of the Caddy configuration on the VPS.
-* **No review of the Eidolon side.** The golden-egg integration is absent there
-  (one mention, in `src/ui/launcher.py`), which is a gap in *that* tree.
+* ~~No review of the Eidolon side.~~ Partially lifted — see N-11. The
+  golden-egg integration is still absent there (one mention, in
+  `src/ui/launcher.py`), and no security review of that tree was attempted.
 * **No cryptographic review of primitives.** The 2026-05-28 report's judgement on
   domain separation, constant-time comparison and CSPRNG use was accepted rather
   than re-derived.
-* **No coverage measurement.** "901 tests collected, green" is a count, not
-  coverage. `pytest-cov` is available and was not run.
+* ~~No coverage measurement.~~ **Measured after the fact: 84%** over 7110
+  statements (`--cov=src/eopx`). Now reported by CI on every run — reported,
+  not gated: a threshold on a number that moves with every new module turns a
+  signal into a chore. Weakest modules: `server/postgres_ledger.py` 15% (its
+  tests skip without a DSN), `server/app.py` 58% (the demo tool),
+  `server/http_delegate.py` 73%, `server/pwa_api.py` 75%. One result deserved
+  a finding of its own — see N-10.
 * **Scalability bottlenecks** from the previous report (anchor SQLite writer
   lock, Argon2 on mobile, the lock server as a SPOF) were not re-measured. Only
   the Argon2 item has a code change (the mobile profile).
@@ -259,6 +265,59 @@ An audit is worth as much as its stated limits.
 6. **P1-7 residual** — authenticate the `psnx` registry write path.
 
 Nothing on this list blocks publication in the way the 2026-05-28 P0s did.
+
+---
+
+## Addendum, same day — two findings from measuring coverage
+
+### N-10 — `metatron/local_rectify.py` is dead code in the scan path
+
+**Severity: low, but 92 statements.** Coverage reported it at **0%**, and the
+reason is not a missing test: **nothing imports it**. The only reference in the
+tree is a comment in `render.py` noting that the inner ArUco markers it needs
+are "not currently rendered", and `print_sheet.py` records that the
+cube-adjacent markers were disabled because OpenCV did not detect them
+reliably. The live rectifier is `metatron/aruco.py`, which carries its own
+`detect_cube_aruco` / `rectify_cube_via_cube_aruco`.
+
+So it is an unreferenced duplicate of a live path — the kind that gets a bug
+fixed in one copy and not the other. Either wire it up or delete it; leaving it
+looking like part of the pipeline is the one option with no upside.
+
+### N-11 — Eidolon: coverage was configured, shadowed, and never measured
+
+**Severity: medium (a declared floor that was never enforced).** Three
+independent problems, found while measuring:
+
+1. **CI runs no tests.** `.github/workflows/ci.yml` compiles the public sources,
+   validates `pyproject.toml` and checks `.gitignore`. There are **58 test
+   files** and the workflow executes none of them.
+2. **The coverage configuration was inert.** `setup.cfg` carried
+   `addopts = … --cov=src` and `[coverage:report] fail_under = 70`. pytest
+   prefers `pyproject.toml`'s `[tool.pytest.ini_options]`, which exists and has
+   neither. **The repository declared a 70% floor it never measured.** Measured
+   on 2026-09-09: **29%** over 33 710 statements.
+3. **A guarded import that does not guard.** `src/api/server.py` prints
+   `[ERROR] FastAPI not installed` and continues, then evaluates
+   `class ChallengeRequest(BaseModel)` — a `NameError` at import instead of the
+   clear `ImportError` that `src/api/connect.py` raises two files away.
+
+Five test modules also failed to collect on undeclared dependencies
+(`pydantic`, `fastapi`, `PyJWT`, `python-multipart`, `httpx`). With those
+installed the suite runs: **52 failures**, and the dominant cause is a single
+missing artifact — the `eidolon_crypto` Rust extension is not built, which
+accounts for the great majority of them.
+
+*Fixed here:* the duplicate configuration is removed from `setup.cfg`, which
+now points at `pyproject.toml` and says why re-adding a section there would be
+ignored; `--cov=src` and `show_missing` move to `pyproject.toml`, so coverage
+is measured by default. **`fail_under` is deliberately not carried over**:
+setting 70 today fails every run. Pick a floor from the real number and raise
+it, rather than inheriting an aspiration.
+
+*Not fixed, and a decision rather than a task:* wiring Eidolon's CI to run its
+tests would turn that repository red immediately. Building `eidolon_crypto`
+first is the sequencing that makes the switch meaningful.
 
 ---
 
