@@ -125,6 +125,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **The license-boundary guard no longer imports the tree it audits.**
+  `tools/license_boundary.py` is a static AST scan that executes no code from
+  `eopx` — except that its lock header drew a randomart sigil via
+  `eopx.collection.sigil`, and reaching that module through the package first
+  ran `collection/__init__` → `genesis_token` → `format.keys` → `pqcrypto`. A
+  boundary guard whose result depends on the auditee being importable is not a
+  guard. `sigil.py` imports nothing but `hashlib`, so the tool now loads that
+  one file by path; the lock is byte-identical and the guard runs anywhere.
+* **`eopx.genesis_token` derives positions without the signing stack.** Same
+  deferral as `egg_token`: the 88 Genesis positions come from a public Bitcoin
+  block hash and `GENESIS_COMMITMENT.md` promises anyone can recompute them,
+  but the module-level `EopxKey` import made every consumer of
+  `eopx.collection` — the PWA's `/codex` endpoint included — require
+  `pqcrypto`. Only the seal is signed, so only the seal needs it.
+
 * **`vault_fp` has one definition again (`eopx.vault.identity`).** Three
   derivations had grown up in the tree and disagreed for the same vault:
   `card_fingerprint(card)` (`vault/enroll`, `vault/genesis`, `collection`),

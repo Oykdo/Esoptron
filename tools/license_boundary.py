@@ -72,9 +72,26 @@ def _fingerprint(surface: set[str]) -> str:
 
 
 def _sigil(fp_hex: str) -> list[str]:
-    from eopx.collection.sigil import randomart
+    """Drunken-bishop art for the lock header.
 
-    return randomart(bytes.fromhex(fp_hex))
+    ``eopx.collection.sigil`` imports nothing but ``hashlib``, yet reaching it
+    as ``eopx.collection.sigil`` first executes the package ``__init__``, which
+    pulls genesis_token -> format.keys -> pqcrypto. That contradicts this
+    tool's own contract: it is a static AST scan that executes no code from the
+    tree it audits, and a boundary guard whose result depends on the auditee
+    being importable is not a guard. Loading the one file by path keeps the
+    property, and keeps the lock reproducible on a machine with no
+    post-quantum stack.
+    """
+    import importlib.util
+
+    path = ROOT / "src" / "eopx" / "collection" / "sigil.py"
+    spec = importlib.util.spec_from_file_location("_eopx_sigil", path)
+    if spec is None or spec.loader is None:  # pragma: no cover - unreachable
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.randomart(bytes.fromhex(fp_hex))
 
 
 def build_body() -> str:
