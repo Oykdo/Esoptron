@@ -186,12 +186,12 @@ author:            Jérémy ZGONEC
 timestamp:         2026-05-31T13:29:49Z
 
 spec:              docs/GENESIS_COMMITMENT.md
-hash:              sha3-256:cf38c6266af9c73a57abf00e43061655f16056c226e83d56399c730fd4911273
-bytes-raw:         3804
-bytes-normalised:  3804
+hash:              sha3-256:aea910b6481c03d4831073671db9b617bf83e2365378dda2a9f50e423d2d3c87
+bytes-raw:         5501
+bytes-normalised:  5501
 normalisation:     utf8+nobom+lf+striptrailws+finallf+nfc
 author:            Jérémy ZGONEC
-timestamp:         2026-06-04T09:56:23Z
+timestamp:         2026-09-09T17:32:33Z
 
 spec:              tools/license_boundary.lock
 hash:              sha3-256:5a6f1226dd3c3f8b6a78e119b5573c7ff79f3bb01f09e0afd9027ff865440bf2
@@ -214,9 +214,9 @@ author:            Jérémy ZGONEC
 timestamp:         2026-09-09T14:41:20Z
 
 spec:              docs/audit_report_2026-09-09.md
-hash:              sha3-256:d61c127a1570b4c086cbbee2a0f61e70f38c79928e2c71067f7031b7d44b4bd4
-bytes-raw:         15678
-bytes-normalised:  15678
+hash:              sha3-256:848159b7e50f4e633520bb940b4b71072ebdfd0f42b4c929ab5c6ff082b641fa
+bytes-raw:         18473
+bytes-normalised:  18473
 normalisation:     utf8+nobom+lf+striptrailws+finallf+nfc
 author:            Jérémy ZGONEC
-timestamp:         2026-09-09T16:49:07Z
+timestamp:         2026-09-09T17:33:10Z

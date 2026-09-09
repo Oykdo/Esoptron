@@ -35,9 +35,9 @@ reading the current code.
 
 | Metric | 2026-05-28 | 2026-09-09 |
 | --- | --- | --- |
-| Findings open, 05-28 sweep only | 23 (P0: 6, P1: 9, P2: 8) | **6** |
-| Of the original 23 | — | 19 fixed, 3 partial, 1 mitigated |
-| New findings raised since | — | 9 (7 fixed, 2 open) |
+| Findings open, 05-28 sweep only | 23 (P0: 6, P1: 9, P2: 8) | **0** |
+| Of the original 23 | — | 23 fixed |
+| New findings raised since | — | 9, all fixed |
 | Test files | — | 62 |
 | Suite (Windows, local) | could not collect | **901 collected, green**, 8 skipped |
 | CI (Linux/Win/macOS ×2 + TS + PWA) | — | green, 8/8 jobs |
@@ -82,7 +82,12 @@ something that looked settled was not, and nothing failed to say so.
 | P2-6 | `card_fingerprint` coerced instead of validating | Explicit `0 <= s < 13` guard raising `ValueError` (`verify_card.py:40`). |
 | P2-8 | `GenesisSeal` signed-field drift | `tests/test_genesis_token.py:322` enumerates the canonical fields. |
 
-### Partially closed (3)
+### Closed later the same day (3)
+
+The three residuals below were written up as partial, then closed in the same
+session. They are kept as separate entries rather than folded into the table
+above because the shape of each residual is the interesting part.
+
 
 **P0-4 — raw frame persistence.** The reported `out/last_upload.jpg` is gone and
 the upload dump is now gated (`_DEBUG_DUMP_FRAMES and config.mode != "private"`,
@@ -254,6 +259,52 @@ An audit is worth as much as its stated limits.
 6. **P1-7 residual** — authenticate the `psnx` registry write path.
 
 Nothing on this list blocks publication in the way the 2026-05-28 P0s did.
+
+---
+
+## Addendum, same day — residuals closed
+
+Written after the body above, and subject to the same declared conflict of
+interest: these were fixed by the author of this report.
+
+**P0-4 residual (N-3) — closed.** `_diagnostics_allowed(cfg)` now gates both
+decode-path writers: off unless `ESOPTRON_DEBUG_DUMP_FRAMES=1`, and never in
+`private` mode whatever the operator asked for. The mode check is not a
+convenience — the cube crop is the decodable region of a sheet that
+reconstructs a 256-bit seed.
+
+**P0-2 — closed by deletion, not by a flag.** The ~390-line inline `SCAN_HTML`
+page is gone, with its hand-rolled SHA-256 and all five `esoptron.mobile.*`
+info strings; so is `ESOPTRON_ENABLE_LEGACY_MOBILE_HTML`. `/scan` redirects to
+the PWA or answers 410. A second KDF chain that an environment variable can
+revive is a second KDF chain, and the audit's own recommendation was to retire
+it in favour of the PWA. `tests/test_server_loopback.py` now asserts the info
+strings are absent **from the module source**, so re-adding the page fails a
+test rather than a review.
+
+**P1-7 — closed with it.** `/api/register_psnx` was the deleted page's only
+client. An unauthenticated, unquota'd write endpoint with no client is worse
+than no endpoint, so the route answers 410 and `_register_public_psnx`,
+`_validate_public_psnx` and `_contains_private_field` are removed. If a public
+registry is wanted again it should return authenticated, as the audit asked.
+
+**N-4 — closed.** The deployment key's temp file is created with
+`os.open(..., 0o600)` instead of being written at the process umask and
+tightened after `replace`. `restrict_secret_file` stays as the cross-platform
+backstop, since `O_CREAT`'s mode argument is ignored on Windows.
+
+**N-5 — closed.** `relic_vault_fp` is now `relic_seal_seed`; the derivation is
+byte-identical and a deprecated alias remains. A test pins the value for all
+twelve relics, because their badge seals are already minted on the live anchor.
+
+**N-6 — closed as a documentation defect.** `GENESIS_COMMITMENT.md` claimed
+without qualification that anyone can recompute everything from the block hash
+alone. True for the Genesis positions, the relic distribution and the 555-egg
+clutch; **false for a founder draw**, which additionally takes the vault
+fingerprint — recorded there only as `f02cc7…d7be`. The claim is now scoped,
+the GE-111 attribution is marked void (its vault no longer exists), and three
+requirements are recorded for the next one: full fingerprint, stated
+definition, and the egg the draw returns rather than a chosen one.
 
 ---
 

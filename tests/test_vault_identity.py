@@ -164,3 +164,31 @@ def test_epx2_test_vector_matches_the_canonical_definition():
         b"esoptron.invitation.v1|" + code.encode("utf-8") + b"|spinor"
     ).digest()
     assert m.group(1) == vault_fingerprint(spinor).hex()
+
+
+# --------------------------------------------------------------------------- #
+# A relic seal seed is not a vault fingerprint
+# --------------------------------------------------------------------------- #
+
+def test_relic_seal_seed_keeps_its_value_across_the_rename():
+    """Renaming must not redraw twelve badges that are already minted.
+
+    ``relic_seal_seed`` was called ``relic_vault_fp``, which made it a fourth
+    thing named after a vault fingerprint. It identifies no vault -- it only
+    selects the revealed hexagram -- but the twelve relics on the live anchor
+    derive their seals from it, so the value is pinned here and the deprecated
+    alias must keep returning it.
+    """
+    import hashlib
+
+    from eopx.collection import CODEX
+    from eopx.collection.forge import relic_seal_seed, relic_vault_fp
+
+    for relic in CODEX:
+        expected = hashlib.sha3_256(relic.artifact_id()).digest()
+        assert relic_seal_seed(relic) == expected
+        assert relic_vault_fp(relic) == expected
+
+    # And it is emphatically not the vault fingerprint of anything.
+    first = CODEX[0]
+    assert relic_seal_seed(first) != vault_fingerprint(first.spinor_seed())

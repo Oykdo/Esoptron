@@ -105,93 +105,72 @@ def test_dashboard_html_renders():
     assert b"data:image/png;base64," in r.data
 
 
-def test_scan_page_renders(monkeypatch):
-    monkeypatch.setenv("ESOPTRON_ENABLE_LEGACY_MOBILE_HTML", "1")
-    monkeypatch.setattr(
-        "eopx.server.app._ENABLE_LEGACY_MOBILE_HTML", True
-    )
-    app = create_app(ServerConfig(mode="sas",
-                                    spinor_hex="00" * 64))
-    client = app.test_client()
-    r = client.get("/scan")
-    assert r.status_code == 200
-    assert b"Capturer" in r.data
+def test_scan_page_redirects_to_the_pwa_when_configured(monkeypatch):
+    monkeypatch.setenv("ESOPTRON_PWA_URL", "https://example.invalid/pwa")
+    import importlib
+
+    import eopx.server.app as app_mod
+    importlib.reload(app_mod)
+    try:
+        client = app_mod.create_app(
+            app_mod.ServerConfig(mode="sas", spinor_hex="00" * 64)
+        ).test_client()
+        r = client.get("/scan")
+        assert r.status_code == 200
+        assert b"example.invalid/pwa" in r.data
+    finally:
+        monkeypatch.delenv("ESOPTRON_PWA_URL", raising=False)
+        importlib.reload(app_mod)
 
 
-def test_scan_page_disabled_by_default():
-    app = create_app(ServerConfig(mode="sas",
-                                    spinor_hex="00" * 64))
-    client = app.test_client()
-    r = client.get("/scan")
+def test_scan_page_is_gone_without_a_pwa_url():
+    app = create_app(ServerConfig(mode="sas", spinor_hex="00" * 64))
+    r = app.test_client().get("/scan")
     assert r.status_code == 410
 
 
-def test_genesis_scan_page_contains_local_onboarding(monkeypatch):
-    monkeypatch.setattr(
-        "eopx.server.app._ENABLE_LEGACY_MOBILE_HTML", True
-    )
+def test_register_psnx_is_gone(tmp_path, monkeypatch):
+    """The public psnx registry was removed, not merely disabled.
+
+    It accepted caller-supplied JSON and appended it to a registry under
+    ``out/`` with no authentication and no quota (audit 2026-05-28, P1-7).
+    Its only client was the inline ``/scan`` page, whose divergent KDF chain
+    has been deleted, so the endpoint answers 410 and writes nothing.
+    """
+    monkeypatch.chdir(tmp_path)
     app = create_app(ServerConfig(mode="genesis"))
     client = app.test_client()
+
+    r = client.post("/api/register_psnx", json={
+        "format": "psnx", "version": 1, "security": "public",
+        "vault_id": "vlt_" + "a" * 32,
+    })
+    assert r.status_code == 410
+    assert r.get_json()["status"] == "GONE"
+    assert not (tmp_path / "out" / "registry").exists()
+
+
+def test_legacy_scan_page_no_longer_serves_its_own_crypto(tmp_path, monkeypatch):
+    """The phone is sent to the PWA; there is no second KDF chain to revive.
+
+    The page used to be gated behind ESOPTRON_ENABLE_LEGACY_MOBILE_HTML, which
+    deferred the decision rather than making it. No environment variable brings
+    it back, so the test asserts on the absence of the info strings too.
+    """
+    import eopx.server.app as app_mod
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ESOPTRON_ENABLE_LEGACY_MOBILE_HTML", "1")
+    client = create_app(ServerConfig(mode="genesis")).test_client()
+
     r = client.get("/scan")
-    assert r.status_code == 200
-    assert b"createOnboardingPackage" in r.data
-    assert b"registerPublicPsnx" in r.data
-    assert b"blend_data" in r.data
-    assert b"psnx" in r.data
+    assert r.status_code == 410
+    body = r.data.decode("utf-8", "replace")
+    assert "esoptron.mobile" not in body
 
-
-def test_register_psnx_stores_only_public_material(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "eopx.server.app._ENABLE_LEGACY_MOBILE_HTML", True
-    )
-    app = create_app(ServerConfig(mode="genesis"))
-    client = app.test_client()
-    psnx = {
-        "format": "psnx",
-        "version": 1,
-        "security": "public",
-        "vault_id": "vlt_" + "a" * 32,
-        "created_at": "2026-05-26T00:00:00.000Z",
-        "ceremony_fp_hex": "b" * 64,
-        "vault_fp_hex": "c" * 64,
-        "enrollment_fp_hex": "d" * 64,
-        "public_tag_hex": "e" * 32,
-        "kdf": "HKDF-HMAC-SHA256 browser-local v1",
-    }
-
-    r = client.post("/api/register_psnx", json=psnx)
-    assert r.status_code == 200, r.data
-    body = r.get_json()
-    assert body["status"] == "REGISTERED"
-    assert body["vault_id"] == psnx["vault_id"]
-    assert (tmp_path / "out" / "registry"
-            / f"{psnx['vault_id']}.psnx.json").exists()
-    assert (tmp_path / "out" / "registry"
-            / "vault_registry.jsonl").exists()
-
-
-def test_register_psnx_rejects_private_material(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "eopx.server.app._ENABLE_LEGACY_MOBILE_HTML", True
-    )
-    app = create_app(ServerConfig(mode="genesis"))
-    client = app.test_client()
-    psnx = {
-        "format": "psnx",
-        "version": 1,
-        "security": "public",
-        "vault_id": "vlt_" + "a" * 32,
-        "ceremony_fp_hex": "b" * 64,
-        "vault_fp_hex": "c" * 64,
-        "enrollment_fp_hex": "d" * 64,
-        "public_tag_hex": "e" * 32,
-        "vault_seed_hex": "f" * 64,
-    }
-
-    r = client.post("/api/register_psnx", json=psnx)
-    assert r.status_code == 400
-    body = r.get_json()
-    assert body["status"] == "REJECTED"
-    assert "private-looking field" in body["detail"]
+    source = Path(app_mod.__file__).read_text(encoding="utf-8")
+    for info in ("esoptron.mobile.genesis.vault_seed.sha256.v1",
+                 "esoptron.mobile.vault.master_key.sha256.v1",
+                 "esoptron.mobile.enrollment_fp.sha256.v1",
+                 "esoptron.mobile.public_tag.sha256.v1"):
+        assert info not in source, f"{info} came back"

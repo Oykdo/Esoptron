@@ -125,6 +125,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **The legacy mobile crypto chain is deleted, not disabled (audit P0-2).**
+  `server/app.py` carried ~390 lines of inline HTML with a hand-rolled SHA-256
+  and its own HKDF info strings (`esoptron.mobile.*`), bytewise incompatible
+  with the canonical `esoptron.vault.*` SHA3-512 chain: a `.psnx` from that
+  page described the same vault differently from every other component. It had
+  been put behind `ESOPTRON_ENABLE_LEGACY_MOBILE_HTML`, which defers the
+  decision rather than making it. `/scan` now redirects to the PWA or answers
+  410, and a test asserts the info strings are absent from the module source —
+  so re-adding the page fails a test, not a review.
+* **`/api/register_psnx` is gone with it (audit P1-7).** It appended
+  caller-supplied JSON to a registry under `out/` with no auth and no quota,
+  and its only client was the page above. An unauthenticated write endpoint
+  with no client is worse than no endpoint.
+* **Diagnostic image dumps are gated (audit P0-4 residual).** The reported
+  `out/last_upload.jpg` had been fixed, but the decode path still wrote the
+  rectified A4 and the cube crop on every call, and `_save_diagnostic` took
+  `cfg` without consulting `cfg.mode`. Both now go through
+  `_diagnostics_allowed()`: off unless `ESOPTRON_DEBUG_DUMP_FRAMES=1`, and
+  never in `private` mode. The cube crop is the decodable region of a sheet
+  that reconstructs a 256-bit seed.
+* **The deployment key's temp file is created restricted.** `_persist` wrote it
+  at the process umask and called `restrict_secret_file` only after `replace`,
+  leaving the Dilithium and Kyber secret keys at 0644 on a typical POSIX host
+  for the duration of the write. It is now `os.open(..., 0o600)`, with
+  `restrict_secret_file` kept as the cross-platform backstop.
+* **`relic_vault_fp` renamed to `relic_seal_seed`, value unchanged.** It was a
+  fourth thing named after a vault fingerprint while identifying no vault — it
+  only selects the revealed hexagram. The derivation is byte-identical (twelve
+  relics are minted on the live anchor and their seals come from it) and a test
+  pins every value across the rename.
+
 * **The `.eopx` wire format no longer takes its parameters from the
   dependency (`eopx.format.keys`).** The six ML-DSA-87 / ML-KEM-1024 sizes were
   read off `pqcrypto` at import time, and `eopx_format` validates a file

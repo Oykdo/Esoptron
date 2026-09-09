@@ -40,9 +40,25 @@ from ..transfer.binding import SealedController
 from . import Relic
 
 
-def relic_vault_fp(relic: Relic) -> bytes:
-    """32-byte fingerprint used to seed the badge's seal geometry."""
+def relic_seal_seed(relic: Relic) -> bytes:
+    """32-byte seed selecting the badge's revealed hexagram (EPX-H).
+
+    **This is not a vault fingerprint.** It was called ``relic_vault_fp``
+    because ``render_seal_revealed`` names that parameter ``vault_fp``, and
+    the name made it a fourth answer to "which vault is this" alongside the
+    three that `eopx.vault.identity` had to reconcile. A relic is an artifact,
+    not a vault: this value identifies nothing, it only picks a hexagram.
+
+    The derivation is deliberately unchanged. Twelve relics are already minted
+    on the live anchor and their badge seals come from this value; changing it
+    would redraw them. Renaming costs nothing and removes the trap.
+    """
     return hashlib.sha3_256(relic.artifact_id()).digest()
+
+
+#: Deprecated alias. Kept so an out-of-tree caller does not break silently;
+#: it returns the same bytes it always did.
+relic_vault_fp = relic_seal_seed
 
 
 def relic_merkle_root(relic: Relic) -> bytes:
@@ -57,7 +73,7 @@ def render_relic_badge(relic: Relic, size: int = 1024) -> Image.Image:
     spinor = relic.spinor_seed()
     symbols = encode_public(spinor)
     return render_seal_revealed(
-        symbols, relic_vault_fp(relic), spinor, size=size,
+        symbols, relic_seal_seed(relic), spinor, size=size,
     )
 
 
@@ -136,7 +152,8 @@ def forge_relic(
 
 
 __all__ = [
-    "relic_vault_fp",
+    "relic_seal_seed",
+    "relic_vault_fp",  # deprecated alias
     "relic_merkle_root",
     "render_relic_badge",
     "ForgedRelic",

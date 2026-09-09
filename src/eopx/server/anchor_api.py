@@ -192,9 +192,22 @@ class _DeploymentContext:
             "deployment_kyber_sk_hex": self.deployment_key.kyber_sk.hex(),  # pyright: ignore
             "archetypes_commitment_hex": archetypes_commitment_hex(),
         }
+        # Create the temp file already restricted, rather than writing it at
+        # the process umask and tightening afterwards. `restrict_secret_file`
+        # only runs after `replace`, so the earlier sequence left the Dilithium
+        # and Kyber secret keys on disk at 0644 on a typical POSIX host for the
+        # duration of the write. The window was small; the file was the
+        # deployment key.
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        blob = json.dumps(payload, indent=2).encode("utf-8")
+        fd = os.open(str(tmp), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, blob)
+        finally:
+            os.close(fd)
         tmp.replace(self.path)
+        # Still the cross-platform backstop: O_CREAT's mode argument is
+        # ignored on Windows, where restrict_secret_file sets a DACL instead.
         restrict_secret_file(self.path)
 
 

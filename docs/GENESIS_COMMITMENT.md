@@ -71,17 +71,48 @@ commitment is recorded with the EPX-K spec.
 ### Golden Eggs (EPX-E)
 
 555 eggs across 5 tiers in `[1, 555_555_555]`, positions and tiers derived
-from this block. Founder draw for **vault #1** (`f02cc7…d7be`, "zgo"):
+from this block. **The clutch is fully recomputable** and was re-verified on
+2026-09-09 against `eopx.egg_token.derive_eggs`.
 
-> **GE-111 — Lunar Clutch ☾** · egg_number 111 · position 106,186,118 ·
-> egg_hash `f37eaeef423922187c945caca32f55c65fd50f333564822048653853650f3a6b`
+### Founder draw — void, and why it was never verifiable
 
-(Supersedes the demo attribution GE-254, which used the demo block.)
+A founder draw was recorded here for **vault #1** ("zgo"): GE-111, Lunar
+Clutch ☾, position 106,186,118, egg_hash `f37eaeef…50f3a6b`. It is **void**:
+that vault no longer exists (decision of 2026-09-09).
+
+Two things must be said plainly rather than quietly dropped, because the next
+attribution has to avoid both.
+
+**It was never verifiable.** The draw is
+`idx = SHA3-256(domain ‖ vault_fp ‖ block) % 555`, so its input is the *whole*
+32-byte vault fingerprint. This document recorded only `f02cc7…d7be` — six
+leading and four trailing hex characters. Anyone can recompute the 555
+positions; nobody can recompute *that* draw. The recomputability claim below
+therefore held for the clutch and not for the draw, and said so nowhere.
+
+**The identity it was drawn over is no longer the one in use.** Until
+2026-09-09 three different derivations of `vault_fp` coexisted in the tree and
+disagreed for the same vault. Which one produced `f02cc7…d7be` is not recorded
+either. `eopx.vault.identity` now fixes a single definition —
+`card_fingerprint(encode_public(spinor))`, as EPX-G §143 always required.
+
+**Requirements for the next founder attribution:**
+
+1. Record the **full 32-byte** `vault_fp`, hex, never truncated.
+2. State that it is a card fingerprint per `eopx.vault.identity`.
+3. Take the egg the draw returns. `founder_egg` exists so the attribution is
+   not a choice; hand-placing an egg — including moving GE-111 to a
+   replacement vault — destroys the only property that makes it legitimate.
 
 ## Verification
 
-Anyone can recompute every position from the block hash alone — no secret
-input. The distributions above are reproducible with:
+Anyone can recompute every **position** from the block hash alone — no secret
+input. This covers the Genesis positions, the relic distribution and the
+555-egg clutch. It does **not** cover a founder egg draw, which additionally
+takes the vault's fingerprint: a draw is only checkable by someone holding
+that fingerprint, which is why it must be recorded in full (see above).
+
+The distributions are reproducible with:
 
 ```
 py scripts/forge_collection.py --plan \
