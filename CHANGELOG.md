@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **A measured decode envelope for the camera path (`eopx.metatron.degrade`,
+  `scripts/detect_envelope.py`).** The number that decides a scan is not the
+  global symbol error rate but the **worst interleaved block**: RS(13,10) ×7
+  corrects one error per block, so seven errors spread one per block decode
+  and three in one block do not. Measured at canvas 1024 — perspective holds
+  to strength 2.25 and collapses at 2.5 (1 error → 14, worst block 1 → 4);
+  blur to radius 4 px; JPEG to quality 10; illumination to ±50%; chroma noise
+  to σ 96 without ever breaking. **Geometry is the binding axis; colour is
+  not.** Axes also *compound*: each at a level inside its own envelope, a
+  merely mediocre photograph lands at worst block 2 and fails. Pinned in
+  `tests/test_detect_envelope.py`.
+* **Margin-ranked, per-block erasures (`palette.classify_margin`,
+  `detect.erasures_per_block`, `detect.extract_canonical_full`).** Absolute
+  Oklab distance barely separates misreads from good reads under a mediocre
+  photograph (median 0.032 against 0.028) because a shadow pushes every
+  carrier away from the palette at once. The **margin** — how much closer a
+  carrier sits to its symbol than to the runner-up — does separate (0.034
+  against 0.092), since a difference cancels a common-mode shift. Ranking by
+  margin *within each block* and spending one erasure per block turns the
+  mediocre photograph from a failure into the right seed, where every
+  distance-ranked variant still fails. `extract_robust` climbs that ladder
+  before falling back to the historical global thresholds, and deliberately
+  never spends three erasures on a block: at `2t + e <= 3` that leaves no
+  correction in hand and invites a miscorrection.
+
+### Changed
+
+* **`ScanResult` distinguishes *decoded* from *decoded and verified*
+  (`symbols_in_code`, `blocks_repaired`, `symbols_verified`, `verification`).**
+  A private read that needed correcting is now reported as unverified instead
+  of as a plain success that fails three layers later. The honest basis is
+  narrow and stated as such: a read already in the code C needed no
+  correction, so nothing was inferred; a correction can be counted but never
+  audited, because the payload spends 259 of ~259.2 available bits and has no
+  checksum to spare, and re-encoding the decoder's output only re-derives the
+  decoder's own assumption. For a public card — outside C by construction —
+  the field claims nothing at all and points at the registry instead.
+* **`tests/test_metatron_detect.py` no longer skips its own subject.** The
+  perspective test turned a real decode failure into `pytest.skip`, and
+  asserted `diffs <= 21` where the measured value is 0 — it would have passed
+  through a total collapse of the pipeline. Now a hard bound and a hard
+  assertion.
+
 * **EPX-F — the artifact figure (`eopx.artifact_figure`).** `F` maps a `.eopx`
   to a 16×8 grid of 4-bit levels, derived by HKDF-SHA3-512 from the
   **pre-image** half of the signed manifest — `merkle_root` and

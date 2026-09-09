@@ -347,6 +347,34 @@ def block_decode_iterative(codeword: Sequence[int],
     )
 
 
+def blocks_out_of_code(received: Sequence[int]) -> List[int]:
+    """Which interleaved blocks of a *raw read* are not codewords.
+
+    An empty list means the 91 symbols were read exactly: no correction was
+    needed, nothing was inferred, and the decode that follows is as good as
+    the render. A non-empty list is the honest measure of how much the
+    decoder will have to invent.
+
+    Why this and not a check on the decoder's output: re-encoding what the
+    decoder returned cannot detect a miscorrection, because the decoder's
+    output is by construction close to what was received — the test would
+    only re-derive the decoder's own assumption. Detecting a bad decode needs
+    redundancy the decoder did not consume, and the private payload has none
+    to spare (259 bits of version+seed in 70 base-13 digits, ~259.2 bits of
+    capacity). So a correction can be *counted*, never *audited*, and a read
+    that needed corrections must be reported as decoded-but-unverified rather
+    than as a success.
+    """
+    if len(received) != TOTAL_N:
+        return list(range(NUM_BLOCKS))
+    out: List[int] = []
+    for b in range(NUM_BLOCKS):
+        block = [received[i * NUM_BLOCKS + b] for i in range(BLOCK_N)]
+        if not is_block_codeword(block):
+            out.append(b)
+    return out
+
+
 def is_in_code(codeword: Sequence[int]) -> bool:
     """Theorem 2 test for the full 91-symbol vector.
 
