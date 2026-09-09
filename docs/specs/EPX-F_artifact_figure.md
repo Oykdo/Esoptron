@@ -7,14 +7,14 @@
 | Version         | 1                                                         |
 | Date            | 2026-09-09                                                |
 | Author          | Jérémy ZGONEC                                             |
-| Layer           | `eopx.artifact_figure` (derivation); presentation is free |
+| Layer           | `eopx.artifact_figure` (derivation), `eopx.epoch_chain` (§5), `eopx.figure_plate` (§6) |
 | Wire compat     | Additive — reads the manifest, modifies nothing           |
-| Dependencies    | stdlib only (`hashlib`) + `eopx.metatron.field.hkdf_sha3_512` |
+| Dependencies    | stdlib + `eopx.metatron.field.hkdf_sha3_512`; §5 also uses `eopx.format.keys` |
 
 ## Changelog
 
 * **v1** — Initial draft. Two-band grid, pre-image inputs only, epoch tag from
-  `dilithium_pk_fp`.
+  `dilithium_pk_fp`, both-ended epoch links (§5), presentation rules (§6).
 
 ## Abstract
 
@@ -146,9 +146,80 @@ accept an artifact minted under epoch N, without epoch N's key still being
 live. Without this chain, a parc of printed artifacts has the lifetime of a
 single key.
 
-The attestation record format and its publication endpoint are **out of scope
-for v1** and are the immediate follow-on work. What v1 fixes is the input:
-`dilithium_pk_fp` is the epoch, and it is inside the signed payload.
+### 5.1 The epoch link (normative)
+
+An **epoch link** binds two consecutive epochs. It carries the predecessor's
+**full public key**, not merely its fingerprint: a fingerprint identifies a key,
+it does not let anyone verify a signature made with it.
+
+```
+canonical_bytes =
+  "esoptron.epoch.link.v1" \n
+  "version="             <int>            \n
+  "predecessor_pk_b64="  <base64>         \n
+  "successor_pk_b64="    <base64>         \n
+  "issued_utc="          <RFC3339 Z>      \n
+  "statement="           <free text>
+
+digest = SHA3-512(canonical_bytes)
+```
+
+Signatures cover `digest` and are excluded from it, as is the witness key — a
+witness attests to an *existing* link, so adding one must not invalidate the
+signatures already on it.
+
+| Signature          | Made by         | Answers                                    |
+| ------------------ | --------------- | ------------------------------------------ |
+| `successor_sig`    | the new key     | "walk backwards from today's key"          |
+| `predecessor_sig`  | the old key     | "and you did not invent this ancestor"     |
+| `witness_sig`      | a third key     | "both my keys were stolen together"        |
+
+### 5.2 Strong and weak links
+
+A link carrying a verifying `predecessor_sig` is **strong**; one carrying only
+`successor_sig` is **weak**.
+
+The distinction is the security of the whole scheme. An attacker who steals the
+current secret key can sign anything the current key could sign — including a
+link naming an ancestor that never existed, and therefore a whole fabricated
+lineage of artifacts. What that attacker cannot produce is the *predecessor's*
+signature over that link, because a strong link is minted **at rotation time,
+while the old key is still alive**.
+
+Verifiers MUST refuse weak links by default. A weak link is only honest when
+the predecessor secret is genuinely gone, and accepting one must be a
+deliberate act (`require_strong=False`).
+
+### 5.3 Resolving an epoch
+
+```
+resolve_epoch(chain, trusted_pk, target_fp):
+    if fp(trusted_pk) == target_fp: return trusted_pk
+    current = trusted_pk
+    repeat, bounded by max_hops:
+        link = the link whose successor is current      # none -> fail
+        if link.successor_pk != current: fail           # substituted key
+        if not verify_link(link): fail
+        if weak and require_strong: fail
+        current = link.predecessor_pk
+        if already visited: fail                        # cycle
+        if fp(current) == target_fp: return current
+```
+
+The walk is bounded and cycle-checked: a hostile chain must not be able to spin
+a verifier. Resolving an epoch yields *the key to check the artifact with* — it
+is not itself a check of the artifact.
+
+### 5.4 Out of scope for v1
+
+**Revocation.** A link says "this key succeeded that one". It says nothing
+about whether the predecessor was honest, nor about a compromise that predates
+the rotation. A chain that also had to express "ignore everything epoch N
+signed after date D" is a different and larger object, and pretending otherwise
+in v1 would be the dangerous kind of convenience.
+
+Implementation: `eopx.epoch_chain` (`build_link`, `verify_link`,
+`resolve_epoch`, `dump_chain`/`load_chain` for publication).
 
 ## 6. Presentation, and what must never move
 
@@ -175,6 +246,20 @@ Two rules bound this freedom:
    `LIVING_INTERIOR_CAP`) is a hint for the eye. If it is beautiful, people
    will try to "verify" by looking at it; it must therefore be visibly distinct
    from the EPX-F face.
+
+`eopx.figure_plate` implements this. A **frozen** plate is drawn with a solid
+frame and prints its tag, because the tag is precisely what a reader may
+compare against a recomputation. A **living** plate is drawn with a dashed
+frame and prints **no tag at all** — the omission is the safety property, not
+an oversight: there is nothing on a moving face that a reader could mistake for
+something to compare. Drift is bounded by `LIVING_CELL_CAP` and is deterministic
+in the ledger state, so two viewers of the same state see the same shimmer.
+
+`UNICODE_RAMP` orders block elements by ink coverage, breaking ties by shape so
+the face gains texture rather than a flat gradient. It is perceptual, not
+metric, and several of its code points are East-Asian *ambiguous* width: when
+column alignment must be exact — a printed table, a fixed-width report — use
+`ASCII_RAMP` and an ASCII frame.
 
 ## 7. Verification
 

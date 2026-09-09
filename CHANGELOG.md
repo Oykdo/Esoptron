@@ -25,6 +25,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   covers the levels, so a Unicode ramp is a free substitution. Frozen at v1
   with normative test vectors (`docs/specs/EPX-F_artifact_figure.md` §9,
   `tests/test_artifact_figure.py`); brand only, never security (POSITIONING).
+* **Epoch links (`eopx.epoch_chain`, EPX-F §5).** A badge outlives the key that
+  minted it. An `EpochLink` binds two consecutive epochs and carries the
+  predecessor's **full public key** — a fingerprint identifies a key, it does
+  not let anyone verify a signature made with it. Signed from both ends: the
+  successor's signature is what lets a verifier holding only today's key walk
+  *backwards*, and the predecessor's — minted at rotation time, while the old
+  key still lives — is what stops a stolen current key from inventing an
+  ancestor and, with it, a whole fabricated lineage. Links carrying both are
+  **strong**; `resolve_epoch` refuses weak ones unless explicitly asked, and
+  the walk is hop-bounded and cycle-checked. An optional third witness key
+  cosigns the same digest, reusing the dual-signature pattern of
+  `tools/sign_spec.py`. Revocation is deliberately out of scope for v1.
+* **Figure plates (`eopx.figure_plate`, EPX-F §6).** Unicode block-element
+  plates, galleries and animation frames over an EPX-F grid. A **frozen** plate
+  has a solid frame and prints its tag — the thing a reader compares against a
+  recomputation. A **living** plate has a dashed frame and prints **no tag**:
+  the omission is the safety property, so a moving face can never be mistaken
+  for the artifact's identity. `UNICODE_RAMP` orders block elements by ink
+  coverage and breaks ties by shape; `ASCII_RAMP` remains the choice when
+  column alignment must be exact.
 
 ### Fixed
 
