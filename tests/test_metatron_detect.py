@@ -3,7 +3,6 @@
 import os
 import random
 
-import pytest
 from PIL import Image
 import numpy as np
 
@@ -86,7 +85,8 @@ def test_rectify_with_perspective_distortion():
 
     from eopx.metatron.detect import _compute_homography
     H = _compute_homography(src_canonical, src_distorted)
-    H_inv = np.linalg.inv(H); H_inv = H_inv / H_inv[2, 2]
+    H_inv = np.linalg.inv(H)
+    H_inv = H_inv / H_inv[2, 2]
     coeffs = tuple(H_inv.flatten()[:8])
     distorted = img.transform(
         (canvas, canvas), Image.Transform.PERSPECTIVE, coeffs,
@@ -96,21 +96,22 @@ def test_rectify_with_perspective_distortion():
     rect_syms, rect_dists, _ = extract_from_photo(
         distorted, src_distorted, dst_size=canvas,
     )
+    # Measured: this distortion costs 0 misread carriers (see
+    # scripts/detect_envelope.py). The bound leaves room for resampling
+    # differences between platforms and nothing more — the previous bound of
+    # 21 was the theoretical erasure ceiling and would have passed through a
+    # total collapse of the pipeline.
     diffs = sum(1 for a, b in zip(rect_syms, cw) if a != b)
-    assert diffs <= 21, (
+    assert diffs <= 2, (
         f"too many symbol mismatches after perspective recovery: {diffs}"
     )
 
-    # The RS layer should now recover the seed if we use the confidence
-    # signal to flag uncertain carriers as erasures.
+    # The RS layer must recover the seed, using the confidence signal to flag
+    # uncertain carriers as erasures. A failure here is a regression in the
+    # camera path and must fail the suite — never skip it.
     erasures = erasures_from_confidences(rect_dists, threshold=0.12)
-    try:
-        recovered, _ = decode_private(rect_syms, erasures=erasures)
-        assert recovered == seed
-    except ValueError as e:
-        pytest.skip(
-            f"perspective distortion exceeded current decoder budget: {e}"
-        )
+    recovered, _ = decode_private(rect_syms, erasures=erasures)
+    assert recovered == seed
 
 
 def test_confidence_distance_is_low_for_pristine_render():
