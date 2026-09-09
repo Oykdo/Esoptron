@@ -340,12 +340,69 @@ class GrantLedger:
         return ledger
 
 
+# =============================================================================
+# Provenance of an existing EggSeal
+# =============================================================================
+
+PROVENANCE_SEQUENCE = "sequence"
+PROVENANCE_DRAW = "founder_draw"
+PROVENANCE_UNPROVEN = "unproven"
+
+
+def seal_provenance(
+    seal,
+    *,
+    eggs: List[GoldenEgg],
+    btc_block_hash: bytes,
+    vault_sequence: Optional[int] = None,
+) -> str:
+    """Say *why* the vault in ``seal`` holds its egg.
+
+    ``verify_egg_seal`` proves the issuer signed the seal and that the egg
+    belongs to the published clutch — nothing more. It cannot prove the vault
+    obtained the egg legitimately, and there are two legitimate ways:
+
+    * ``"sequence"``     — the vault's registration sequence landed exactly on
+                           the egg's position. This is what the anchor API
+                           mints on (``eggs_by_position[record.sequence]``).
+                           Pass ``vault_sequence`` from the anchor record to
+                           check it; the seal alone cannot carry that proof.
+    * ``"founder_draw"`` — the egg matches ``founder_egg`` for this vault, the
+                           reproducible founder attribution.
+    * ``"unproven"``     — neither holds. The seal is authentic, but nothing
+                           explains the attribution: it was an issuer decision.
+                           Such an attribution belongs in an ``EggGrant`` with
+                           ``kind="issuer_grant"``, where it is stated openly.
+
+    "unproven" is not an accusation of forgery — a forged seal fails
+    ``verify_egg_seal`` outright. It means the seal asserts a win that nothing
+    corroborates, which is exactly the ambiguity this module exists to remove.
+    """
+    if vault_sequence is not None and seal.position == vault_sequence:
+        return PROVENANCE_SEQUENCE
+
+    try:
+        vault_fp = bytes.fromhex(seal.vault_fp_hex)
+    except ValueError:
+        return PROVENANCE_UNPROVEN
+
+    drawn = eggs[founder_draw_index(vault_fp, btc_block_hash, total=len(eggs))]
+    if drawn.egg_id == seal.egg_id:
+        return PROVENANCE_DRAW
+
+    return PROVENANCE_UNPROVEN
+
+
 __all__ = [
     "EggGrant",
     "GrantLedger",
     "GENESIS_LINK",
     "KIND_DRAW",
     "KIND_ISSUER",
+    "PROVENANCE_DRAW",
+    "PROVENANCE_SEQUENCE",
+    "PROVENANCE_UNPROVEN",
     "mint_egg_grant",
+    "seal_provenance",
     "verify_egg_grant",
 ]
