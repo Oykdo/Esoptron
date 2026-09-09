@@ -214,7 +214,9 @@ if __name__ == "__main__":
     }
     vpath = os.path.join(os.path.dirname(__file__), "..", "pwa", "src", "lib",
                          "__tests__", "reveal_vector.json")
-    with open(vpath, "w", encoding="utf-8") as f:
+    # newline="\n": without it, Python's text mode writes CRLF on Windows and
+    # the committed vector fails the repo's UTF-8/LF gate on every regeneration.
+    with open(vpath, "w", encoding="utf-8", newline="\n") as f:
         json.dump(vec, f, indent=2)
     print(f"[vector] interop vector -> {os.path.normpath(vpath)}")
 
