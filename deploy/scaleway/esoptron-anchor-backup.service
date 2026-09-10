@@ -1,0 +1,10 @@
+[Unit]
+Description=Sauvegarde rotative du registre d'artefacts EPX-T
+Documentation=file:///opt/esoptron/deploy/scaleway/backup_anchor_db.sh
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/esoptron/deploy/scaleway/backup_anchor_db.sh
+User=root
+Environment=KEEP=30
+Environment=BACKUP_DIR=/root/backups/esoptron-anchor

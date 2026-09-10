@@ -1,0 +1,12 @@
+[Unit]
+Description=Sauvegarde quotidienne du registre d'artefacts EPX-T
+
+[Timer]
+# 00:30 UTC : apres le tick Eidolon (00:00) et la sauvegarde du registre des
+# vaults (00:15), pour etaler les trois ecritures nocturnes.
+OnCalendar=*-*-* 00:30:00 UTC
+Persistent=true
+Unit=esoptron-anchor-backup.service
+
+[Install]
+WantedBy=timers.target

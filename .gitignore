@@ -84,3 +84,22 @@ sim_photo.jpg
 # Handover stays local (the *[Hh]andover* rule above misses the all-caps name)
 *HANDOVER*
 
+
+# --- Exception ciblee : sauvegarde du registre d'artefacts (2026-09-10) ---
+# La regle `deploy/` ci-dessus reste en vigueur pour tout le reste. Ces trois
+# fichiers ne portent aucun secret -- le DSN est lu depuis /opt/esoptron/
+# anchor.env au moment de l'execution -- et ils protegent le registre le plus
+# irremplacable de l'ecosysteme : celui qui porte Speculum Primum, deja perdu
+# une fois. Un script anti-perte qui n'existe que sur un disque est
+# exactement le probleme qu'il pretend resoudre.
+#
+# Git ne descend pas dans un dossier exclu : re-inclure les fichiers exige de
+# rouvrir chaque niveau puis de le refermer, d'ou les quatre lignes qui
+# precedent les trois negations.
+!deploy/
+deploy/*
+!deploy/scaleway/
+deploy/scaleway/*
+!deploy/scaleway/backup_anchor_db.sh
+!deploy/scaleway/esoptron-anchor-backup.service
+!deploy/scaleway/esoptron-anchor-backup.timer
