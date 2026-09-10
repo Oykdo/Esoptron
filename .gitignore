@@ -103,3 +103,4 @@ deploy/scaleway/*
 !deploy/scaleway/backup_anchor_db.sh
 !deploy/scaleway/esoptron-anchor-backup.service
 !deploy/scaleway/esoptron-anchor-backup.timer
+!deploy/scaleway/verify_anchor_restore.sh
